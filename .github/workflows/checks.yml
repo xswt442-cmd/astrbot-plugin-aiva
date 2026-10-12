@@ -1,0 +1,92 @@
+name: checks
+
+on:
+  # 门禁要跑在改动还能被处理的地方。只有 push 和定时任务时，第一个信号
+  # 是合并提交把 main 弄红，而合并请求可能从未被测过。
+  pull_request:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main, dev]
+
+# 每个分支一次运行：一串提交会互相取消，而不是把完整的检查排在彼此后面。
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: 静态检查与测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: 准备 Python
+        run: uv python install
+
+      - name: 安装依赖
+        run: uv sync --locked
+
+      - name: lint
+        run: uv run ruff check .
+
+      - name: 格式检查
+        run: uv run ruff format --check .
+
+      - name: 测试
+        run: uv run pytest -q
+
+  dependencies:
+    name: 依赖清单同步
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: 准备 Python
+        run: uv python install
+
+      - name: 同步依赖
+        run: uv sync --locked
+
+      # requirements.txt 是 AstrBot 安装插件时唯一看的清单，而它必须保持手写：
+      # uv export 会把包钉成 `==`，与核心自带依赖的版本护栏冲突，装不上。
+      # 具体约束写成 test/test_requirements.py 里的断言，在 tests 里一起跑。
+      - name: 检查依赖清单
+        run: uv run pytest test/test_requirements.py -q
+
+  # 完美平台的接口没有公开文档，字段与请求头都可能随他们的版本变动而失效。
+  # 单测用构造数据，钉得住解析逻辑，钉不住「字段名与量纲有没有变」——kast 从
+  # 74 变成 0.74 这类改版，构造数据照样能过。所以要定期打真实接口对照。
+  # 一天跑一次足够：接口坏了不会自己好，每次提交都跑也没有额外价值。
+  live:
+    name: 真实接口验证
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: 准备 Python
+        run: uv python install
+
+      - name: 同步依赖
+        run: uv sync --locked
+
+      # 掌瓦所有端点都要登录，这里探的是「还活着、但要登录」而不是「能不能取到数据」。
+      # 端点返回 404 才是真的没了。
+      - name: 接口还通
+        run: uv run python test/verify_mval.py

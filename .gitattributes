@@ -1,0 +1,8 @@
+# 这些不进 `git archive` 出的包：开发时用的文件，装插件时用不上。
+# 发布流程见 docs/RELEASING.md。
+
+icon/ export-ignore
+.github/ export-ignore
+docs/ export-ignore
+test/ export-ignore
+uv.lock export-ignore

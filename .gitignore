@@ -1,0 +1,15 @@
+# 依赖与缓存
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# 编辑器
+.vscode/
+.idea/
+
+# 构建产物
+build/
+dist/
+*.egg-info/
