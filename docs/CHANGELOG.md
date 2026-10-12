@@ -46,7 +46,17 @@
 - **凭据不进日志。** `扫码结果.__repr__` 只给 openid 长度，
   `storage.凭据摘要` 只给 userId 的前后各几位。
 
+### 修正
+
+- 修掉一个**只在容器加载时才暴露**的问题：`_取近期战绩` 在同一函数里既要
+  `yield` 错误提示、又要 `return (文本, 摘要)`，触发
+  `SyntaxError: 'return' with value in async generator`——AstrBot 导入插件
+  直接失败并把插件卸掉。本地 `pytest` 一行都跑不到这条路径。改成抛
+  `这句给用户`，并补了 `test/test_main_structure.py` 把这条钉住。
+
 ### 说明
 
 - 工程配置、`.gitattributes` 排除项与发布流程照 `astrbot_plugin_aiwm`
   拉平，两个插件保持同一套 CI 门禁。
+- 还没有图标（`logo.png`）。发版流程里的图标章节见 `docs/RELEASING.md`，
+  做图标时要顺手把 `test_metadata.py` 里的三条图标检查补回去。

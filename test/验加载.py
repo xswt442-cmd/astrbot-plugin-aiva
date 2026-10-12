@@ -77,9 +77,16 @@ if not 问题:
     print("[通过] 兜底的挂法")
 
 # 5. 真的 import 一遍插件里的模块（不加载插件，只验模块级代码）
-for 模块 in ("aiva.兜底", "aiva.pk", "aiva.match", "aiva.stats",
-             "aiva.prompts", "aiva.storage", "aiva.transport",
-             "aiva.auth.ptlogin"):
+for 模块 in (
+    "aiva.兜底",
+    "aiva.pk",
+    "aiva.match",
+    "aiva.stats",
+    "aiva.prompts",
+    "aiva.storage",
+    "aiva.transport",
+    "aiva.auth.ptlogin",
+):
     try:
         importlib.import_module(模块)
     except Exception as exc:
