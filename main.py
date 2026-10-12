@@ -75,6 +75,14 @@ _帮助文本 = """爱瓦 · 无畏契约国服战绩查询
 _昵称上限 = 16
 
 
+class 这句给用户(Exception):
+    """取不到数据但**不是故障**时抛它，消息原文发给用户。
+
+    跟异常放在一起是因为走返回值得在同一函数里既要 `yield` 又要
+    `return <值>`——那在 async generator 里直接 SyntaxError。
+    """
+
+
 class _落空兜底(CustomFilter):
     """`/爱瓦 <不是子命令>` 时自己接住，别让消息流到模型手里。"""
 
@@ -232,8 +240,10 @@ class Main(Star):
     async def 战绩(self, event: AstrMessageEvent):
         """近期战绩数据。"""
         用户 = event.get_sender_id()
-        数据 = await self._取近期战绩(event, 用户)
-        if 数据 is None:
+        try:
+            数据 = await self._取近期战绩(用户)
+        except 这句给用户 as exc:
+            yield event.plain_result(str(exc))
             return
         yield event.plain_result(数据[0])
 
@@ -241,11 +251,13 @@ class Main(Star):
     async def 锐评(self, event: AstrMessageEvent):
         """让模型基于近期数据写一段锐评。"""
         用户 = event.get_sender_id()
-        数据 = await self._取近期战绩(event, 用户)
-        if 数据 is None:
+        try:
+            数据 = await self._取近期战绩(用户)
+        except 这句给用户 as exc:
+            yield event.plain_result(str(exc))
             return
 
-        文本, 摘要 = 数据
+        文本 = 数据[0]
         try:
             结果 = await self._问模型(event, 锐评提示(文本))
         except Exception as exc:
@@ -368,36 +380,36 @@ class Main(Star):
             return ""
         return 名字[:_昵称上限]
 
-    async def _取近期战绩(
-        self, event: AstrMessageEvent, 用户: str
-    ) -> tuple[str, dict[str, Any]] | None:
-        """取数据并折成文本。出错时自己回消息，返回 None 表示别往下走。"""
+    async def _取近期战绩(self, 用户: str) -> tuple[str, dict[str, Any]]:
+        """取数据并折成文本。取不到时抛 `这句给用户`。
+
+        写成 `return None` 是不行的：调用它的指令本身是异步生成器，而这个辅助
+        函数也跟着写了 `yield`——在同一函数里既要 `yield` 又要 `return <值>`，
+        Python 直接给 SyntaxError（`return with value in async generator`）。
+        真正的加载阶段才报错，本地测试看不到。所以这里一律抛，
+        调用方负责把话发出去。
+        """
         凭据 = self._凭据.读取(用户)
         if not 凭据 or not 凭据是否齐全(凭据):
-            yield event.plain_result("还没绑定。发 /爱瓦 绑定 扫码登录。")
-            return None
+            raise 这句给用户("还没绑定。发 /爱瓦 绑定 扫码登录。")
 
         传输 = 掌瓦传输()
         try:
             原始列表 = (await 传输.取对局列表(凭据)).get("list") or []
-        except 登录过期:
-            yield event.plain_result("登录态失效了，请重新 /爱瓦 绑定。")
-            return None
+        except 登录过期 as exc:
+            raise 这句给用户("登录态失效了，请重新 /爱瓦 绑定。") from exc
         except 业务错误 as exc:
-            yield event.plain_result(f"接口不给数据：{exc}")
-            return None
+            raise 这句给用户(f"接口不给数据：{exc}") from exc
         except Exception as exc:
             logger.warning(f"[aiva] 取对局列表失败：{type(exc).__name__}: {exc}")
-            yield event.plain_result(f"取战绩失败：{exc}")
-            return None
+            raise 这句给用户(f"取战绩失败：{exc}") from exc
 
         摘要 = 聚合(原始列表)
         if not 摘要.get("场数"):
-            yield event.plain_result(
+            raise 这句给用户(
                 "接口没返回可统计的对局。可能是这个号还没打过竞技/普通模式，"
                 "或者最近的对局被隐私设置挡住了。"
             )
-            return None
         return 近况文本(摘要), 摘要
 
     async def _问模型(self, event: AstrMessageEvent, 提示: str) -> str:
