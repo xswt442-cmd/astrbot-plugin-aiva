@@ -21,7 +21,7 @@ from typing import Any
 
 import aiohttp
 
-__all__ = ["掌瓦传输", "业务错误", "登录过期"]
+__all__ = ["掌瓦传输", "业务错误", "登录过期", "取对局"]
 
 _接口根 = "https://app.mval.qq.com"
 _通用查询 = "source_game_zone=agame&game_zone=agame"
@@ -84,6 +84,22 @@ def 拼Cookie(凭据: dict[str, Any]) -> str:
     return "; ".join(段)
 
 
+async def 取对局(凭据: dict[str, Any], 每页: int = 20) -> list[dict[str, Any]]:
+    """取这个用户的近期对局列表。
+
+    **一个都不能少**：这个函数会自己先打一次主角色接口拿 `scene` 和
+    `game_role_id`，再拿它们去要对局列表。这两个参数缺任何一个，腾讯都回
+    `result:1003 / "wrong scene: "`——而 1003 长得像登录过期，会让人以为
+    要重新扫码，其实是自己的锅，重扫一百次也没用。
+
+    所以调用方只用管传凭据，别自己去拼这个请求体。
+    """
+    传输 = 掌瓦传输()
+    _, 场景, 角色ID = await 传输.取角色上下文(凭据)
+    数据 = await 传输.取对局列表(凭据, 场景, 角色ID, 每页=每页)
+    return 数据.get("battle_list") or 数据.get("list") or []
+
+
 class 掌瓦传输:
     """一次性的请求器。拿到凭据后调用 `取...` 系列。"""
 
@@ -128,24 +144,80 @@ class 掌瓦传输:
         }
 
     async def 取主角色(self, 凭据: dict[str, Any]) -> dict[str, Any]:
-        """取默认游戏角色（昵称、头像、角色 ID）。"""
+        """取默认游戏角色。
+
+        返回里有两个**后面每个接口都要用**的字段，别丢：
+        - `scene`：219 长的临时令牌，对局列表/详情全都必带，缺了接口回
+          `result:1003 wrong scene`（而且这个 1003 **不是**登录过期，
+          翻译错了会让人以为要重新扫码）。
+        - `game_role_id`：形如 `651cca5e-...`，同样必带。
+        """
         原始 = await self._请求("POST", _主角色, 凭据, json体={"_t": int(time.time())})
         return 原始.get("data") or {}
+
+    async def 取角色上下文(self, 凭据: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+        """一次性拿全：角色信息 + `scene` + `game_role_id`。
+
+        每次查战绩都要这三个东西，而 `scene` 只在主角色返回里、且**每轮都会变**，
+        所以不能存起来复用——必须每次现取。封在这里，免得每个调用点各写一遍
+        然后漏传 scene（漏了的表现是 `result:1003 wrong scene`，很像登录过期，
+        但让用户重扫码也没用）。
+        """
+        数据 = await self.取主角色(凭据)
+        列表 = 数据.get("list") or []
+        角色 = 列表[0] if 列表 else {}
+        return 角色, str(角色.get("scene") or ""), str(角色.get("game_role_id") or "")
 
     async def 取对局列表(
         self,
         凭据: dict[str, Any],
-        页游标: str = "",
+        场景: str,
+        角色ID: str,
+        页码: int = 1,
         每页: int = 20,
+        游标: str = "",
     ) -> dict[str, Any]:
-        """取近期对局。`页游标` 是上一次返回的 next_baton，空串表示从头。"""
-        体 = {"next_baton": 页游标, "page_size": 每页, "_t": int(time.time())}
+        """取近期对局。
+
+        `场景` 与 `角色ID` 来自 `取主角色()`。这两个参数不是可选的：
+        少了任何一个，腾讯都回 `result:1003 / "wrong scene: "`。
+
+        翻页用 `页码` + `游标`：第一次游标留空，之后把上一次返回的
+        `next_baton` 原样传回来。
+        """
+        体: dict[str, Any] = {
+            "game_role_id": 角色ID,
+            "scene": 场景,
+            "page_no": 页码,
+            "page_size": 每页,
+            "_t": int(time.time()),
+        }
+        if 游标:
+            体["baton"] = 游标
         原始 = await self._请求("POST", _对局列表, 凭据, json体=体)
         return 原始.get("data") or {}
 
-    async def 取记分板(self, 凭据: dict[str, Any], 对局ID: str) -> dict[str, Any]:
-        """取单局的十人记分板：K/D/A、ACS、爆头率、经济、特工。"""
-        体 = {"match_id": 对局ID, "_t": int(time.time())}
+    async def 取记分板(
+        self,
+        凭据: dict[str, Any],
+        场景: str,
+        对局ID: str,
+        比赛ID: str = "",
+        角色ID: str = "",
+    ) -> dict[str, Any]:
+        """取单局的十人记分板：K/D/A、ACS、爆头率、经济、特工。
+
+        `对局ID` 与 `比赛ID` 都是列表里那条记录自带的，别混：前者叫
+        `battle_id`，后者叫 `match_id`，两个不同的 UUID。
+        """
+        体: dict[str, Any] = {
+            "battle_id": 对局ID,
+            "match_id": 比赛ID,
+            "scene": 场景,
+            "_t": int(time.time()),
+        }
+        if 角色ID:
+            体["game_role_id"] = 角色ID
         原始 = await self._请求("POST", _对局详情, 凭据, json体=体)
         return 原始.get("data") or {}
 
@@ -198,9 +270,24 @@ class 掌瓦传输:
 
 
 def _是登录问题(原始: dict[str, Any]) -> bool:
+    """判断是不是「登录态过期，要用户重新扫码」。
+
+    **别只看错误码**：`result:1003` 线上实测过两种完全不同的含义——
+    参数错（`wrong scene:`，我们自己的锅）和真登录过期（腾讯的锅）。
+    把参数错翻译成「请重新扫码」会让用户白扫一次码，锅还背错。
+
+    所以先看消息文本里有没有登录态相关的关键词，再看码。
+    """
+    消息 = str(原始.get("err_msg") or 原始.get("errMsg") or 原始.get("msg") or "").lower()
+    if any(词 in 消息 for 词 in ("wrong scene", "wrong param", "bad request")):
+        # 参数错，别赖到登录态头上。
+        return False
     码 = 原始.get("result", -1)
-    消息 = str(原始.get("errMsg") or 原始.get("msg") or "")
-    return 码 in (1001, 1003, 999999) or "ticket" in 消息.lower()
+    if "ticket" in 消息 or "login" in 消息 or "登录" in 消息:
+        return True
+    # 999999 配 DecodeTgpTicket 才是腾讯的登录态问题；
+    # 1001/1003 没有明确消息时按可疑处理。
+    return 码 in (1001, 1003, 999999)
 
 
 def _翻译错误(原始: dict[str, Any]) -> str:
@@ -209,8 +296,12 @@ def _翻译错误(原始: dict[str, Any]) -> str:
     别把 errMsg 原样抛给用户——那是给抓包的人看的。
     """
     码 = 原始.get("result", -1)
+    消息 = str(原始.get("err_msg") or 原始.get("errMsg") or "")
     if _是登录问题(原始):
         return "登录态失效，请重新扫码绑定"
+    if "wrong scene" in 消息.lower():
+        # 自己少传了 scene/game_role_id，跟用户的登录态无关。
+        return "内部取数据缺参数（scene），这是插件的 bug，已记日志"
     if 码 == 1018:
         return "查得太快了，稍等一下再试"
     if 码 == 1203:

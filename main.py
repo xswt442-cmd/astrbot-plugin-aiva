@@ -31,7 +31,7 @@ from .aiva.pk import 找对手
 from .aiva.prompts import PK提示, 开局提示, 锐评提示
 from .aiva.stats import 占优项数, 对比文本, 对比要点, 聚合, 近况文本
 from .aiva.storage import 凭据仓库, 凭据摘要, 凭据是否齐全
-from .aiva.transport import 业务错误, 掌瓦传输, 登录过期
+from .aiva.transport import 业务错误, 取对局, 掌瓦传输, 登录过期
 from .aiva.兜底 import 以组名开头, 取落空参数, 是否落空, 落空提示
 
 _组名 = "爱瓦"
@@ -366,8 +366,7 @@ class Main(Star):
 
         if 凭据 and 凭据是否齐全(凭据):
             try:
-                传输 = 掌瓦传输()
-                原始的对局 = (await 传输.取对局列表(凭据)).get("list") or []
+                原始的对局 = await 取对局(凭据)
                 摘要 = 聚合(原始的对局)
             except Exception as exc:  # noqa: BLE001 - 推演不因查不到就停
                 logger.info(f"[aiva] 开一局读战绩失败，按默认水平：{exc}")
@@ -415,10 +414,9 @@ class Main(Star):
         甲名 = self._名字(event) or "你"
         乙名 = f"对手{凭据摘要(乙凭据)}"
 
-        传输 = 掌瓦传输()
         try:
-            甲列表 = (await 传输.取对局列表(甲凭据)).get("list") or []
-            乙列表 = (await 传输.取对局列表(乙凭据)).get("list") or []
+            甲列表 = await 取对局(甲凭据)
+            乙列表 = await 取对局(乙凭据)
         except 登录过期:
             yield event.plain_result("有人的登录态失效了，请重新 /爱瓦 绑定。")
             return
@@ -481,9 +479,8 @@ class Main(Star):
         if not 凭据 or not 凭据是否齐全(凭据):
             raise 这句给用户("还没绑定。发 /爱瓦 绑定 扫码登录。")
 
-        传输 = 掌瓦传输()
         try:
-            原始列表 = (await 传输.取对局列表(凭据)).get("list") or []
+            原始列表 = await 取对局(凭据)
         except 登录过期 as exc:
             raise 这句给用户("登录态失效了，请重新 /爱瓦 绑定。") from exc
         except 业务错误 as exc:
