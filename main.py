@@ -473,14 +473,32 @@ class Main(Star):
 
         消息 = getattr(event, "message_obj", None)
         机器人 = str(getattr(event, "self_id", "") or "")
+        原始 = getattr(消息, "raw_message", None)
+
+        # **每一次 PK 都打这几行**，不管认没认出来。
+        # 之前这个指令报「没认出要和谁比」时日志里一行都没有，只能靠读
+        # 适配器源码反推——但源码只告诉我适配器丢了什么，没告诉我实际
+        # 传进来什么。找不到对手时这几行是唯一线索。
+        提及 = [
+            {
+                "id": getattr(项, "id", None),
+                "username": getattr(项, "username", None),
+                "is_you": getattr(项, "is_you", None),
+                "bot": getattr(项, "bot", None),
+            }
+            for 项 in (getattr(原始, "mentions", None) or [])
+        ]
+        logger.info(
+            f"[aiva] PK 找对手：自己={自己!r} self_id={机器人!r}"
+            f"\n  raw_message={type(原始).__name__}"
+            f"\n  mentions={提及!r}"
+            f"\n  组件链={[getattr(c, 'type', None) for c in (getattr(消息, 'message', None) or [])]!r}"
+            f"\n  message_str={getattr(event, 'message_str', '')[:120]!r}"
+        )
 
         # QQ 官方平台上组件链和正文都拿不到 @别人 的 ID（适配器只转
         # `is_you` 的），必须回头读 `raw_message.mentions`。详见 aiva/pk.py。
-        对手标识 = 从提及里找对手(
-            getattr(消息, "raw_message", None),
-            自己=自己,
-            机器人=机器人,
-        )
+        对手标识 = 从提及里找对手(原始, 自己=自己, 机器人=机器人)
         if not 对手标识:
             对手标识 = 找对手(
                 getattr(消息, "message", None) or [],
@@ -488,6 +506,7 @@ class Main(Star):
                 自己=自己,
                 机器人=机器人,
             )
+        logger.info(f"[aiva] PK 认出对手={对手标识!r}")
         if not 对手标识:
             yield event.plain_result(
                 "没认出要和谁比。发「/爱瓦 PK @群友」，@ 到那个人才行——\n"
