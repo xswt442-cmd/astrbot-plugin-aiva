@@ -31,7 +31,7 @@ from .aiva.pk import 找对手
 from .aiva.prompts import PK提示, 开局提示, 锐评提示
 from .aiva.stats import 占优项数, 对比文本, 对比要点, 聚合, 近况文本
 from .aiva.storage import 凭据仓库, 凭据摘要, 凭据是否齐全
-from .aiva.transport import 业务错误, 取对局, 掌瓦传输, 登录过期
+from .aiva.transport import 业务错误, 挂日志, 取对局, 掌瓦传输, 登录过期
 from .aiva.兜底 import 以组名开头, 取落空参数, 是否落空, 落空提示
 
 _组名 = "爱瓦"
@@ -139,6 +139,10 @@ class Main(Star):
         """
         super().__init__(context)
         self.config = config
+        # transport 刻意不 import astrbot（本地 pytest 要能直接跑它），
+        # 代价是拿不到框架 logger。这里把 logger 挂给它 ——
+        # 「用户说没反应」这类问题唯一的出路就是日志。
+        挂日志(lambda 一句: logger.info(f"[aiva] {一句}"))
         self._凭据 = 凭据仓库(self._数据目录())
 
     def _数据目录(self) -> Path:

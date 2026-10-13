@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import ssl
 import time
+from collections.abc import Callable
 from typing import Any
 
 import aiohttp
@@ -98,6 +99,25 @@ async def 取对局(凭据: dict[str, Any], 每页: int = 20) -> list[dict[str, 
     _, 场景, 角色ID = await 传输.取角色上下文(凭据)
     数据 = await 传输.取对局列表(凭据, 场景, 角色ID, 每页=每页)
     return 数据.get("battle_list") or 数据.get("list") or []
+
+
+_日志钩子: Callable[[str], None] | None = None
+
+
+def 挂日志(钩子: Callable[[str], None] | None) -> None:
+    """挂一个日志函数进来。
+
+    这个模块刻意不 import astrbot —— 本地 pytest 要能直接跑它。
+    代价是拿不到框架 logger，而「用户说没反应」这类问题唯一的出路就是日志，
+    所以由 main.py 在启动时把 logger 挂进来。
+    """
+    global _日志钩子
+    _日志钩子 = 钩子
+
+
+def _记(一句: str) -> None:
+    if _日志钩子 is not None:
+        _日志钩子(一句)
 
 
 class 掌瓦传输:
@@ -248,6 +268,7 @@ class 掌瓦传输:
             地址 = f"{地址}?{_通用查询}"
 
         连接器 = aiohttp.TCPConnector(ssl=_不校验的SSL())
+        _记(f"→ {方法} {路径} body={_体摘要(json体)}")
         async with aiohttp.ClientSession(
             connector=连接器, timeout=aiohttp.ClientTimeout(total=self._超时)
         ) as 会话:
@@ -257,6 +278,7 @@ class 掌瓦传输:
                 原始 = json.loads(文本) if 文本.strip().startswith("{") else {}
             except json.JSONDecodeError:
                 raise 业务错误(f"接口没返回 JSON（HTTP {响应.status}）") from None
+        _记(f"← {路径} HTTP {响应.status} result={原始.get('result')!r}")
 
         if not 校验:
             if 原始.get("result") != 0:
@@ -265,8 +287,33 @@ class 掌瓦传输:
         if 原始.get("result") != 0:
             # 登录态过期跟其他错误不是一个性质：前者要用户重新扫码，
             # 后者多半是接口变了。上层用不同类型接。
-            raise 登录过期(_翻译错误(原始)) if _是登录问题(原始) else 业务错误(_翻译错误(原始))
+            #
+            # **两种都要带原文**：只翻译成人话的话，用户看到「登录态失效」
+            # 但我们完全不知道腾讯到底说了什么，这种黑箱已经浪费过一整天。
+            # 消息文本里带上 result 与 err_msg，排查时直接能对上。
+            译文 = _翻译错误(原始)
+            原文 = (
+                f"result={原始.get('result')!r} "
+                f"err_msg={原始.get('err_msg') or 原始.get('errMsg') or 原始.get('msg')!r}"
+            )
+            if _是登录问题(原始):
+                raise 登录过期(f"{译文}（{原文}）") from None
+            raise 业务错误(f"{译文}（{原文}）") from None
         return 原始
+
+
+def _体摘要(体: dict[str, Any] | None) -> str:
+    """请求体的日志摘要。
+
+    只打字段名和值的**长度**，不打内容：`scene`、`openid`、`access_token`
+    都是登录态材料，写进日志就是留一份可以复用的凭据。
+    """
+    if not 体:
+        return "{}"
+    return "{" + ", ".join(
+        f"{k}={str(v)[:6]}…({len(str(v))})" if isinstance(v, str) and len(str(v)) > 8 else f"{k}={v!r}"
+        for k, v in 体.items()
+    ) + "}"
 
 
 def _是登录问题(原始: dict[str, Any]) -> bool:
