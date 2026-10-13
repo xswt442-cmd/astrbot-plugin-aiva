@@ -62,9 +62,7 @@ def _可用(候选: Any, 排除: set[str]) -> str | None:
     return 值
 
 
-def 从提及里找对手(
-    原始消息: Any, *, 自己: str = "", 机器人: str = ""
-) -> str | None:
+def 从提及里找对手(原始消息: Any, *, 自己: str = "", 机器人: str = "") -> str | None:
     """从 `raw_message.mentions` 里找对手，找不到返回 None。
 
     跳过 `is_you` 的（那是 @机器人）和 `bot` 的。
@@ -114,9 +112,7 @@ def 提及摘要(原始消息: Any) -> list[dict[str, Any]]:
     return 出
 
 
-def 从原始载荷认对手(
-    原始消息: Any, *, 自己: str = "", 机器人: str = ""
-) -> str | None:
+def 从原始载荷认对手(原始消息: Any, *, 自己: str = "", 机器人: str = "") -> str | None:
     """从 QQ 原始 payload（`raw_data` / `msg_elements`）里找被 @ 的人。
 
     这是 QQ 官方平台上最有可能拿到对手的地方：`mentions` 实测为空，
@@ -163,9 +159,7 @@ def 从原始载荷认对手(
     return None
 
 
-def 找对手(
-    消息列表, 文本: str, *, 自己: str = "", 机器人: str = ""
-) -> str | None:
+def 找对手(消息列表, 文本: str, *, 自己: str = "", 机器人: str = "") -> str | None:
     """从组件链和正文里找 PK 的对手标识，找不到返回 None。
 
     `自己` 与 `机器人` 都得排掉：群里 @机器人 同样会生成一个 At 组件，

@@ -80,9 +80,7 @@ def 记昵称(凭据: dict[str, Any], 昵称: str) -> dict[str, Any]:
 _昵称上限 = 32
 
 
-def 找同名的人(
-    仓库: "凭据仓库", 关键词: str, *, 自己: str = ""
-) -> list[tuple[str, str]]:
+def 找同名的人(仓库: 凭据仓库, 关键词: str, *, 自己: str = "") -> list[tuple[str, str]]:
     """在所有已绑定的人里找昵称匹配 `关键词` 的，返回 `[(用户标识, 昵称)]`。
 
     匹配规则：忽略大小写 + 去空格 + 子串包含。`znne` 能匹配到 `ZnNe`，

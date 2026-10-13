@@ -39,9 +39,7 @@ class Test预算按墙钟不按次数:
     def test_不再有次数式预算(self):
         """次数式预算是这次事故的根因，必须彻底消失。"""
         for 已废 in ("_轮询次数", "_轮询间隔"):
-            assert 已废 not in 主源码, (
-                f"{已废} 是次数式预算，服务器网络慢时会把二维码拖过期"
-            )
+            assert 已废 not in 主源码, f"{已废} 是次数式预算，服务器网络慢时会把二维码拖过期"
 
     def test_节奏与预算是浮点常量(self):
         assert _常量("_轮询节奏") == 2.0
@@ -73,9 +71,7 @@ class Test轮询循环结构:
         """
         for 节点 in ast.walk(_绑定函数()):
             if isinstance(节点, ast.For):
-                assert 节点.orelse == [], (
-                    "for...else 结构已废弃，预算必须靠墙钟而不是次数"
-                )
+                assert 节点.orelse == [], "for...else 结构已废弃，预算必须靠墙钟而不是次数"
 
     def test_下一拍按节奏累加(self):
         """慢的请求不该把节奏拖长：从节奏点累加，不是 sleep(固定) 起步。"""
@@ -122,15 +118,15 @@ class Test区分不出码原因:
 
 class Testptlogin留原始响应:
     def test_会话保存最近原文(self):
-        源码 = (
-            Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py"
-        ).read_text(encoding="utf-8")
+        源码 = (Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py").read_text(
+            encoding="utf-8"
+        )
         assert "最近原文" in 源码
 
     def test_代码0但没凭据时抛错而非静默返回none(self):
         """code=0 是腾讯说「扫了并确认了」。这时静默返回 None 会让
         用户只看到「超时了」，把我们的解析 bug 误报成用户没扫。"""
-        源码 = (
-            Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py"
-        ).read_text(encoding="utf-8")
+        源码 = (Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py").read_text(
+            encoding="utf-8"
+        )
         assert "腾讯已确认扫码" in 源码

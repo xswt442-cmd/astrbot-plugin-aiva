@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from aiva.auth.ptlogin import _从地址提凭据, _正文里的下一跳, 扫码结果, 扫码会话
+from aiva.auth.ptlogin import _从地址提凭据, _正文里的下一跳, 扫码会话
 
 
 class Test正文里的下一跳:
@@ -21,11 +21,15 @@ class Test正文里的下一跳:
         ("正文", "期望"),
         [
             # 最常见的两种 JS 跳转
-            ("""<script>location.href="http://ptlogin2.graph.qq.com/ck/x?a=1"</script>""",
-             "http://ptlogin2.graph.qq.com/ck/x?a=1"),
-            ("""location.replace('https://xui.ptlogin2.qq.com/next')""",
-             "https://xui.ptlogin2.qq.com/next"),
-            ("window.location = \"http://a.com/b\"", "http://a.com/b"),
+            (
+                """<script>location.href="http://ptlogin2.graph.qq.com/ck/x?a=1"</script>""",
+                "http://ptlogin2.graph.qq.com/ck/x?a=1",
+            ),
+            (
+                """location.replace('https://xui.ptlogin2.qq.com/next')""",
+                "https://xui.ptlogin2.qq.com/next",
+            ),
+            ('window.location = "http://a.com/b"', "http://a.com/b"),
             ("location.assign('http://a.com/c')", "http://a.com/c"),
             # meta refresh
             ('<meta http-equiv="refresh" content="0;url=http://a.com/d">', "http://a.com/d"),
@@ -98,11 +102,12 @@ class Test会话留轨迹:
         """跳数要够。check_sig 之后往往还要再跳两三次。"""
         from pathlib import Path
 
-        源码 = (
-            Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py"
-        ).read_text(encoding="utf-8")
+        源码 = (Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py").read_text(
+            encoding="utf-8"
+        )
         assert "最多: int = 12" in 源码
         assert "_记轨迹" in 源码
+
 
 class Test拼openlogin_data:
     """漏了 pt_openlogin_data，腾讯会回 code=0 但拿不到 token。
@@ -117,9 +122,7 @@ class Test拼openlogin_data:
         from aiva.auth.ptlogin import _拼openlogin_data
 
         会话 = 扫码会话()
-        async with aiohttp.ClientSession(
-            cookie_jar=aiohttp.CookieJar(unsafe=True)
-        ) as 裸:
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as 裸:
             会话._会话 = 裸
             数据 = _拼openlogin_data(会话)
         字段 = dict(pair.split("=", 1) for pair in 数据.split("&"))
@@ -142,9 +145,7 @@ class Test拼openlogin_data:
         from aiva.auth.ptlogin import _拼openlogin_data
 
         会话 = 扫码会话()
-        async with aiohttp.ClientSession(
-            cookie_jar=aiohttp.CookieJar(unsafe=True)
-        ) as 裸:
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as 裸:
             会话._会话 = 裸
             字段 = dict(p.split("=", 1) for p in _拼openlogin_data(会话).split("&"))
         assert 字段["refer_cgi"] == "m_authorize"
@@ -155,9 +156,9 @@ class Test拼openlogin_data:
     def test_轮询必须带上它(self):
         from pathlib import Path
 
-        源码 = (
-            Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py"
-        ).read_text(encoding="utf-8")
+        源码 = (Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py").read_text(
+            encoding="utf-8"
+        )
         assert '"pt_openlogin_data": self._openlogin_data' in 源码
 
 
@@ -202,7 +203,7 @@ class Test收密钥候选:
         assert ("FRAGKEY", "url:redirect_uri_key") in 候选
 
     def test_六个同义字段都认(self):
-        from aiva.auth.ptlogin import _收密钥候选, _密钥字段名
+        from aiva.auth.ptlogin import _密钥字段名, _收密钥候选
 
         类 = 扫码会话()
         类._取cookie = lambda 名字, 域="": ""  # type: ignore[method-assign]
@@ -223,7 +224,7 @@ class Test收密钥候选:
         from aiva.auth.ptlogin import _收密钥候选
 
         类 = 扫码会话()
-        类._取cookie = lambda 名字, 域="": ("CK" if 名字 == "keystr" else "")  # type: ignore[method-assign]
+        类._取cookie = lambda 名字, 域="": "CK" if 名字 == "keystr" else ""  # type: ignore[method-assign]
         候选 = _收密钥候选(类, "")
         assert any(v == "CK" for v, _ in 候选)
 
@@ -247,7 +248,7 @@ class Test提auth回调:
     def test_JSON坏了退回正则(self):
         from aiva.auth.ptlogin import _提auth回调
 
-        正文 = '_Callback({坏掉的 JSON); auth://tauth.qq.com/?#access_token=T&openid=O'
+        正文 = "_Callback({坏掉的 JSON); auth://tauth.qq.com/?#access_token=T&openid=O"
         回调 = _提auth回调(正文)
         assert 回调.startswith("auth://")
 
@@ -274,7 +275,7 @@ class Test换回调链路:
         """跟完跳转没有 token 时必须走换回调这条路，不能直接抛错。"""
         from pathlib import Path
 
-        源码 = (
-            Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py"
-        ).read_text(encoding="utf-8")
+        源码 = (Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py").read_text(
+            encoding="utf-8"
+        )
         assert "await self._用密钥换凭据(跳转)" in 源码, "必须在抛错前先尝试换回调"

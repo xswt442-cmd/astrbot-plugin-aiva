@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, "/AstrBot")
 sys.path.insert(0, "/AstrBot/data/plugins/astrbot_plugin_aiva")
 
+import data.plugins.astrbot_plugin_aiva.main as 插件  # noqa: E402,F401
 from astrbot.core.star.filter.command import CommandFilter  # noqa: E402
 from astrbot.core.star.filter.command_group import (  # noqa: E402
     CommandGroupFilter,
@@ -20,15 +21,13 @@ from astrbot.core.star.star_handler import (  # noqa: E402
     star_handlers_registry,
 )
 
-import data.plugins.astrbot_plugin_aiva.main as 插件  # noqa: E402,F401
-
 
 def 造(文本: str):
+    from astrbot.core.platform.astr_message_event import AstrMessageEvent
     from astrbot.core.platform.astrbot_message import (
         AstrBotMessage,
         MessageType,
     )
-    from astrbot.core.platform.astr_message_event import AstrMessageEvent
     from astrbot.core.platform.platform_metadata import PlatformMetadata
 
     msg = AstrBotMessage()

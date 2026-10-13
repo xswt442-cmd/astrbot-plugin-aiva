@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from aiva.兜底 import 以组名开头, 取落空参数, 是否落空, 子命令名
+from aiva.兜底 import 以组名开头, 取落空参数, 子命令名, 是否落空
 
 源码目录 = Path(__file__).resolve().parent.parent
 main源 = 源码目录 / "main.py"

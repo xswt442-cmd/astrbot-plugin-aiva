@@ -49,7 +49,6 @@ class Test名字是同步的:
         这里按「_名字 是同步函数」的前提检查：调用结果不许再被 await
         （await 一个非协程会 TypeError），也不许不做任何处理就进 f-string。
         """
-        源码 = 主源码
         for n in ast.walk(树):
             if (
                 isinstance(n, ast.Call)
@@ -62,9 +61,7 @@ class Test名字是同步的:
                 for 外 in ast.walk(树):
                     if isinstance(外, ast.Await) and 外.value is n:
                         父 = 外
-                assert 父 is None, (
-                    f"main.py 第 {n.lineno} 行 await 了同步函数 _名字，会 TypeError"
-                )
+                assert 父 is None, f"main.py 第 {n.lineno} 行 await 了同步函数 _名字，会 TypeError"
 
 
 class Test提示词防线:

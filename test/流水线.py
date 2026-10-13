@@ -13,11 +13,11 @@ import sys
 sys.path.insert(0, "/AstrBot")
 sys.path.insert(0, "/AstrBot/data/plugins/astrbot_plugin_aiva")
 
+from astrbot.core.platform.astr_message_event import AstrMessageEvent  # noqa: E402
 from astrbot.core.platform.astrbot_message import (  # noqa: E402
     AstrBotMessage,
     MessageType,
 )
-from astrbot.core.platform.astr_message_event import AstrMessageEvent  # noqa: E402
 from astrbot.core.platform.platform_metadata import PlatformMetadata  # noqa: E402
 
 
@@ -34,7 +34,6 @@ def 造事件(文本: str) -> AstrMessageEvent:
 
 async def 主() -> None:
     import data.plugins.astrbot_plugin_aiva.main  # noqa: F401
-
     from astrbot.core.star.star_handler import (
         EventType,
         star_handlers_registry,
@@ -69,9 +68,7 @@ async def 主() -> None:
             except Exception:  # noqa: BLE001
                 通过 = False
                 break
-        if 通过 and not any(
-            isinstance(f, CommandGroupFilter) for f in h.event_filters
-        ):
+        if 通过 and not any(isinstance(f, CommandGroupFilter) for f in h.event_filters):
             激活.append(h.handler_name)
     print(f"\n对'爱瓦 绑定' 会激活的 handler：{激活}")
 

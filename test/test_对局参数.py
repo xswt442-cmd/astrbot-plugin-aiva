@@ -55,9 +55,7 @@ class Test对局列表必带scene:
 class Test1003不是登录过期:
     def test_wrong_scene不算登录问题(self):
         原始 = {"result": 1003, "err_msg": "wrong scene: "}
-        assert not _是登录问题(原始), (
-            "参数错被当成登录过期，会让用户白扫一百次码"
-        )
+        assert not _是登录问题(原始), "参数错被当成登录过期，会让用户白扫一百次码"
 
     def test_wrong_scene有自己的文案(self):
         文案 = _翻译错误({"result": 1003, "err_msg": "wrong scene: "})

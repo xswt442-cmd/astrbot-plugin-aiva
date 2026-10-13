@@ -331,10 +331,13 @@ def _体摘要(体: dict[str, Any] | None) -> str:
     """
     if not 体:
         return "{}"
-    return "{" + ", ".join(
-        f"{k}={str(v)[:6]}…({len(str(v))})" if isinstance(v, str) and len(str(v)) > 8 else f"{k}={v!r}"
-        for k, v in 体.items()
-    ) + "}"
+
+    def 一项(键: str, 值: Any) -> str:
+        if isinstance(值, str) and len(值) > 8:
+            return f"{键}={值[:6]}…({len(值)})"
+        return f"{键}={值!r}"
+
+    return "{" + ", ".join(一项(k, v) for k, v in 体.items()) + "}"
 
 
 def _是登录问题(原始: dict[str, Any]) -> bool:

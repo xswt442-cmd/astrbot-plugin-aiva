@@ -14,18 +14,17 @@ import sys
 sys.path.insert(0, "/AstrBot")
 sys.path.insert(0, "/AstrBot/data/plugins/astrbot_plugin_aiva")
 
+import data.plugins.astrbot_plugin_aiva.main as 爱瓦插件  # noqa: E402
+from astrbot.core.platform.astr_message_event import AstrMessageEvent  # noqa: E402
 from astrbot.core.platform.astrbot_message import (  # noqa: E402
     AstrBotMessage,
     MessageType,
 )
-from astrbot.core.platform.astr_message_event import AstrMessageEvent  # noqa: E402
 from astrbot.core.platform.platform_metadata import PlatformMetadata  # noqa: E402
 from astrbot.core.star.filter.command import CommandFilter  # noqa: E402
 from astrbot.core.star.filter.command_group import (  # noqa: E402
     CommandGroupFilter,
 )
-
-import data.plugins.astrbot_plugin_aiva.main as 爱瓦插件  # noqa: E402
 
 候选 = [
     "/爱瓦 绑定",
@@ -48,7 +47,7 @@ def 造事件(文本: str) -> AstrMessageEvent:
 
 
 def 主():
-    #装饰器建出来的组挂在 RegisteringCommandable 上
+    # 装饰器建出来的组挂在 RegisteringCommandable 上
     实例 = 爱瓦插件.Main.__new__(爱瓦插件.Main)
     组 = 实例.爱瓦.parent_group
     assert isinstance(组, CommandGroupFilter)
@@ -72,9 +71,7 @@ def 主():
                 print(f"  {名}: 抛错 {type(e).__name__}: {e}")
                 continue
             额外 = ""
-            if isinstance(f, CommandFilter) and event.get_extra(default={}).get(
-                "parsed_params"
-            ):
+            if isinstance(f, CommandFilter) and event.get_extra(default={}).get("parsed_params"):
                 额外 = f" params={event.get_extra(default={})['parsed_params']}"
             print(f"  {'✅' if r else '— '} {名}: {r}{额外}")
         print()

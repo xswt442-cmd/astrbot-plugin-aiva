@@ -134,7 +134,7 @@ class Test绑定时间戳:
     def test_提醒阈值(self):
         import time
 
-        from aiva.storage import 该提醒重绑, 记绑定时间
+        from aiva.storage import 记绑定时间, 该提醒重绑
 
         assert not 该提醒重绑(记绑定时间({}))
         老 = {"绑定于": int(time.time()) - 13 * 3600}

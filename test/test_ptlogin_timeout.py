@@ -19,9 +19,9 @@ import pytest
 
 from aiva.auth.ptlogin import 扫码会话
 
-源码 = (
-    Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py"
-).read_text(encoding="utf-8")
+源码 = (Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py").read_text(
+    encoding="utf-8"
+)
 
 
 class _假响应:
@@ -128,28 +128,23 @@ class Test跳转超时预算:
         assert _跳转超时 >= 10, f"单跳 {_跳转超时} 秒不够腾讯登录接口用"
 
     def test_捕获列表含超时(self):
-        assert (
-            "except (TimeoutError, aiohttp.ClientError, OSError)" in 源码
-        ), "网络异常必须被吃掉，不许穿透到 handler"
+        assert "except (TimeoutError, aiohttp.ClientError, OSError)" in 源码, (
+            "网络异常必须被吃掉，不许穿透到 handler"
+        )
 
 
 class Test轮询异常归类:
     def test_绑定接住超时(self):
         """handler 里必须有 `except asyncio.TimeoutError`。"""
-        主 = (Path(__file__).resolve().parent.parent / "main.py").read_text(
-            encoding="utf-8"
-        )
+        主 = (Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
         assert "except asyncio.TimeoutError:" in 主, "绑定没接住超时，会炸成插件异常"
 
     def test_出码与换票都有兜底(self):
         """任何异常都要翻译成人话，不能冒到框架手上弹 traceback。"""
-        主 = (Path(__file__).resolve().parent.parent / "main.py").read_text(
-            encoding="utf-8"
-        )
+        主 = (Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
         绑定块 = 主.split("async def 绑定")[1].split("@爱瓦.command")[0]
         # 出码、换票各一个宽泛兜底；轮询处是专门的 asyncio.TimeoutError
         assert 绑定块.count("except Exception") >= 2, (
-            "出码 / 换票 两处都该有兜底，实际 "
-            f"{绑定块.count('except Exception')} 处"
+            f"出码 / 换票 两处都该有兜底，实际 {绑定块.count('except Exception')} 处"
         )
         assert "except asyncio.TimeoutError:" in 绑定块, "轮询处没接住超时"

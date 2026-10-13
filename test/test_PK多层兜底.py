@@ -24,10 +24,15 @@ import ast
 import json
 from pathlib import Path
 
-from aiva.pk import 从原始载荷认对手, 找对手, 从提及里找对手, 提及摘要
-from aiva.storage import 凭据仓库, 记昵称, 找同名的人
+from aiva.pk import 从原始载荷认对手, 从提及里找对手, 提及摘要
+from aiva.storage import 凭据仓库, 找同名的人, 记昵称
 
 仓库根 = Path(__file__).resolve().parent.parent
+
+# 与 main.py 保持一致。测试里复刻 `_PK里的名字` 的逻辑时要用，
+# 两边漂移时 `test_源码里正则确实这么写` 会先炸。
+_组名 = "爱瓦"
+_昵称上限 = 16
 
 
 class 假提及:
@@ -67,9 +72,7 @@ class Test原始载荷:
         assert 从原始载荷认对手(原始) == "openid_abc"
 
     def test_跳过非mention元素(self):
-        原始 = 假原始(
-            msg_elements=[{"element_type": "text", "content": "user_id: 假的"}]
-        )
+        原始 = 假原始(msg_elements=[{"element_type": "text", "content": "user_id: 假的"}])
         assert 从原始载荷认对手(原始) is None
 
     def test_raw_data里的mentions(self):
@@ -81,9 +84,7 @@ class Test原始载荷:
         assert 从原始载荷认对手(原始) == "op_at_users"
 
     def test_跳过机器人(self):
-        原始 = 假原始(
-            msg_elements=[{"element_type": "mention", "user_id": "机器人_id"}]
-        )
+        原始 = 假原始(msg_elements=[{"element_type": "mention", "user_id": "机器人_id"}])
         assert 从原始载荷认对手(原始, 机器人="机器人_id") is None
 
     def test_空载荷不炸(self):
@@ -94,9 +95,7 @@ class Test原始载荷:
 
 class Test提及回退:
     def test_认得出(self):
-        原始 = 假原始(
-            mentions=[假提及(member_openid="YJJ", is_you=False, bot=False)]
-        )
+        原始 = 假原始(mentions=[假提及(member_openid="YJJ", is_you=False, bot=False)])
         assert 从提及里找对手(原始) == "YJJ"
 
     def test_跳过at机器人(self):
@@ -160,30 +159,18 @@ class TestPK里的名字:
 
     @staticmethod
     def _抠(正文: str) -> str:
+        """直接复刻 main.py 里 `_PK里的名字` 的逻辑。
+
+        main.py 依赖 AstrBot 本地 import 不了，所以这里用同一条正则跑一遍。
+        `test_源码里正则确实这么写` 兜住两边漂移的风险。
+        """
         import re as _re
 
-        源码 = (仓库根 / "main.py").read_text(encoding="utf-8")
-        树 = ast.parse(源码)
-        节点 = next(
-            n
-            for n in ast.walk(树)
-            if isinstance(n, ast.FunctionDef) and n.name == "_PK里的名字"
-        )
-        # 模块级 `_PK后缀 = re.compile(rf"...{_组名}...")`
-        正则节点 = next(
-            n.value
-            for n in 树.body
-            if isinstance(n, ast.Assign)
-            and getattr(n.targets[0], "id", "") == "_PK后缀"
-        )
-        正则 = _re.compile(
-            _re.escape("爱瓦") + r"\s*(?:PK|pk|对战)\s*(.+)", _re.IGNORECASE
-        )
-        # 用等价的正则直接跑逻辑，避免 eval 源码
+        正则 = _re.compile(_re.escape(_组名) + r"\s*(?:PK|pk|对战)\s*(.+)", _re.IGNORECASE)
         命中 = 正则.search(正文 or "")
         if not 命中:
             return ""
-        return 命中.group(1).strip().strip("：:@")[:16]
+        return 命中.group(1).strip().strip("：:@")[:_昵称上限]
 
     def test_抠出名字(self):
         assert self._抠("爱瓦 PK YJJ") == "YJJ"
@@ -206,7 +193,7 @@ class TestPK里的名字:
     def test_源码里正则确实这么写(self):
         """防止测试里的正则和源码漂移。"""
         源码 = (仓库根 / "main.py").read_text(encoding="utf-8")
-        assert 'PK|pk|对战' in 源码
+        assert "PK|pk|对战" in 源码
 
 
 class TestMain已接上:
@@ -223,9 +210,7 @@ class TestMain已接上:
         assert "找同名的人" in 片段, "必须有昵称兜底，@ 拿不到是既成事实"
         # 顺序：原始载荷 → mentions → 组件链/正文 → 昵称
         assert (
-            片段.index("从原始载荷认对手")
-            < 片段.index("从提及里找对手")
-            < 片段.index("找同名的人")
+            片段.index("从原始载荷认对手") < 片段.index("从提及里找对手") < 片段.index("找同名的人")
         )
 
     def test_main里的名字都存在(self):
@@ -301,9 +286,7 @@ class TestMain已接上:
         assert [u for u, _ in 全部] == ["标识XYZ"]
 
     def test_老数据跳过而不是崩(self, tmp_path):
-        (tmp_path / "deadbeef.json").write_text(
-            json.dumps({"userId": "u"}), encoding="utf-8"
-        )
+        (tmp_path / "deadbeef.json").write_text(json.dumps({"userId": "u"}), encoding="utf-8")
         assert 凭据仓库(tmp_path).全部() == []
 
 

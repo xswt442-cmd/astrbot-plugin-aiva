@@ -29,7 +29,7 @@ from astrbot.core.star.filter.custom_filter import CustomFilter
 # 阶段报错，而不是等用户发了指令才在懒加载里抛模块不存在。
 from .aiva.auth.ptlogin import 扫码会话
 from .aiva.match import 开局设定, 设定文本
-from .aiva.pk import 从原始载荷认对手, 找对手, 从提及里找对手, 提及摘要
+from .aiva.pk import 从原始载荷认对手, 从提及里找对手, 找对手, 提及摘要
 from .aiva.prompts import PK提示, 开局提示, 锐评提示
 from .aiva.stats import 占优项数, 对比文本, 对比要点, 聚合, 近况文本
 from .aiva.storage import (
@@ -37,16 +37,16 @@ from .aiva.storage import (
     凭据摘要,
     凭据是否齐全,
     已绑多久,
-    该提醒重绑,
-    记绑定时间,
-    记昵称,
     找同名的人,
+    记昵称,
+    记绑定时间,
+    该提醒重绑,
 )
 from .aiva.transport import (
     业务错误,
-    挂日志,
     取对局,
     取段位,
+    挂日志,
     掌瓦传输,
     登录过期,
 )
@@ -125,9 +125,7 @@ _昵称上限 = 16
 
 # PK 指令后面跟的名字。`message_str` 在 QQ 官方上已经被适配器剥掉
 # `/爱瓦` 前缀和所有 @，剩下的就是「PK 后面那一截」。
-_PK后缀 = re.compile(
-    rf"{re.escape(_组名)}\s*(?:PK|pk|对战)\s*(.+)", re.IGNORECASE
-)
+_PK后缀 = re.compile(rf"{re.escape(_组名)}\s*(?:PK|pk|对战)\s*(.+)", re.IGNORECASE)
 
 
 def _PK里的名字(正文: str) -> str:
@@ -167,9 +165,7 @@ class _落空兜底(CustomFilter):
             return True
         logger.debug(f"[aiva] 指令命中 message_str={文本!r}")
         if 是否落空(文本, _组名):
-            event.set_result(
-                MessageEventResult().message(落空提示(取落空参数(文本, _组名)))
-            )
+            event.set_result(MessageEventResult().message(落空提示(取落空参数(文本, _组名))))
             event.stop_event()
         return True
 
@@ -227,14 +223,12 @@ class Main(Star):
             还活着 = await self._绑定还活着(已有)
             if 还活着:
                 yield event.plain_result(
-                    f"你已经绑定了账号（{凭据摘要(已有)}），登录态正常。\n"
-                    "要换号先用 /爱瓦 解绑。"
+                    f"你已经绑定了账号（{凭据摘要(已有)}），登录态正常。\n要换号先用 /爱瓦 解绑。"
                 )
                 return
             logger.info(f"[aiva] 用户 {用户} 已有绑定但已失效，允许直接覆盖重绑")
             yield event.plain_result(
-                f"之前的绑定已经失效了（{凭据摘要(已有)}）。\n"
-                "直接重新扫码就行，不用解绑。"
+                f"之前的绑定已经失效了（{凭据摘要(已有)}）。\n直接重新扫码就行，不用解绑。"
             )
 
         会话 = 扫码会话()
@@ -325,8 +319,7 @@ class Main(Star):
                     logger.info(f"[aiva] 第{问了几轮}轮拿到扫码结果")
                     break
                 logger.debug(
-                    f"[aiva] 第{问了几轮}轮未确认，腾讯返回 "
-                    f"{getattr(会话, '最近原文', '')[:160]!r}"
+                    f"[aiva] 第{问了几轮}轮未确认，腾讯返回 {getattr(会话, '最近原文', '')[:160]!r}"
                 )
 
             传输 = 掌瓦传输()
@@ -387,8 +380,7 @@ class Main(Star):
             角色 = await 传输.取主角色(凭据)
         except 登录过期:
             yield event.plain_result(
-                f"⚠️ 已绑定（{凭据摘要(凭据)}），但登录态已失效。"
-                "请 /爱瓦 解绑 后重新绑定。"
+                f"⚠️ 已绑定（{凭据摘要(凭据)}），但登录态已失效。请 /爱瓦 解绑 后重新绑定。"
             )
             return
         except 业务错误 as exc:
@@ -425,7 +417,7 @@ class Main(Star):
             return
 
         名字 = str(角色.get("nickname") or 角色.get("name") or "").strip()
-        行 = f"✅ 绑定正常"
+        行 = "✅ 绑定正常"
         if 名字:
             行 += f"：{名字}（{凭据摘要(凭据)}）"
         else:
@@ -524,13 +516,14 @@ class Main(Star):
         # 平台压根没把被 @ 的人传下来（不是适配器过滤，是服务端没给）。
         # 但适配器把 QQ 原始 payload 存进了 `raw_message.raw_data`，
         # 还有 `msg_elements`——@ 元素应该在那里面。
+        载荷 = getattr(原始, "raw_data", None) or {}
+        元素 = json.dumps(getattr(原始, "msg_elements", None), ensure_ascii=False)[:400]
         logger.info(
             f"[aiva] PK 找对手：自己={自己!r}"
             f"\n  mentions={提及摘要(原始)!r}"
-            f"\n  msg_elements={json.dumps(getattr(原始, 'msg_elements', None), ensure_ascii=False)[:600]!r}"
-            f"\n  raw_data 键={list((getattr(原始, 'raw_data', None) or {}).keys())!r}"
-            f"\n  raw_data.content={(getattr(原始, 'raw_data', None) or {}).get('content')!r}"
-            f"\n  raw_data.mentions={json.dumps((getattr(原始, 'raw_data', None) or {}).get('mentions'), ensure_ascii=False)[:400]!r}"
+            f"\n  msg_elements={元素!r}"
+            f"\n  raw_data 键={list(载荷.keys())!r}"
+            f"\n  raw_data.content={载荷.get('content')!r}"
             f"\n  message_str={正文[:120]!r}"
         )
 
@@ -559,10 +552,7 @@ class Main(Star):
                 )
                 return
             elif 关键词:
-                yield event.plain_result(
-                    f"没找到叫「{关键词}」的绑定用户。"
-                    "让他先发 /爱瓦 绑定。"
-                )
+                yield event.plain_result(f"没找到叫「{关键词}」的绑定用户。让他先发 /爱瓦 绑定。")
                 return
 
         logger.info(f"[aiva] PK 认出对手={对手标识!r}（来源={来源}）")
@@ -591,8 +581,7 @@ class Main(Star):
             # 说清是谁的：两边都挂了才说「有人」，只挂一边就把那个人点出来，
             # 否则两个人都得重扫一遍。
             yield event.plain_result(
-                f"**{甲名}** 的登录态失效了。发 /爱瓦 绑定 重新扫码就行，"
-                "不用先解绑。"
+                f"**{甲名}** 的登录态失效了。发 /爱瓦 绑定 重新扫码就行，不用先解绑。"
                 if not 甲列表
                 else f"**{乙名}** 的登录态失效了。让他发 /爱瓦 绑定 重新扫码。"
             )
@@ -691,10 +680,7 @@ class Main(Star):
             # 文案必须说清「怎么修」：光说「请重新绑定」不够——绑定指令
             # 以前会回「你已经绑定了，要换号先解绑」，用户被两面挡。
             # 现在绑定指令已允许覆盖重扫，这里就照实说「直接重扫」。
-            raise 这句给用户(
-                "登录态失效了。直接发 /爱瓦 绑定 重新扫码就行，"
-                "不用先解绑。"
-            ) from exc
+            raise 这句给用户("登录态失效了。直接发 /爱瓦 绑定 重新扫码就行，不用先解绑。") from exc
         except 业务错误 as exc:
             raise 这句给用户(f"接口不给数据：{exc}") from exc
         except Exception as exc:
@@ -731,9 +717,7 @@ class Main(Star):
            两分钟，所以这里显式压到 1 次。
         """
         try:
-            提供方 = await self.context.get_current_chat_provider_id(
-                event.unified_msg_origin
-            )
+            提供方 = await self.context.get_current_chat_provider_id(event.unified_msg_origin)
         except Exception as exc:
             raise RuntimeError(f"取不到当前对话用的模型：{exc}") from exc
 
@@ -744,10 +728,8 @@ class Main(Star):
         if 实例 is None:
             raise RuntimeError(f"模型 {提供方!r} 不存在或没启用。")
 
-        logger.info(
-            f"[aiva] 调模型 provider={提供方!r} 提示{len(提示)}字，"
-            f"最多等 {_模型超时}秒"
-        )
+        logger.info(f"[aiva] 调模型 provider={提供方!r} 提示{len(提示)}字，最多等 {_模型超时}秒")
+
         async def 打一次() -> str:
             结果 = await asyncio.wait_for(
                 实例.text_chat(
@@ -775,14 +757,11 @@ class Main(Star):
             重试起点 = time.monotonic()
             try:
                 文本 = await 打一次()
-                logger.info(
-                    f"[aiva] 重试用时{time.monotonic() - 重试起点:.1f}秒成功"
-                )
+                logger.info(f"[aiva] 重试用时{time.monotonic() - 重试起点:.1f}秒成功")
             except asyncio.TimeoutError:
                 总用时 = time.monotonic() - 起点
                 logger.warning(
-                    f"[aiva] 调模型两次共 {总用时:.0f}秒都没回话，放弃，"
-                    f"provider={提供方!r}"
+                    f"[aiva] 调模型两次共 {总用时:.0f}秒都没回话，放弃，provider={提供方!r}"
                 )
                 raise RuntimeError(
                     f"模型连试两次共 {总用时:.0f}秒没回话"

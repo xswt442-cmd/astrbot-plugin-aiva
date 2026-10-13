@@ -311,9 +311,7 @@ class 扫码会话:
                     下一位 = (响应.headers.get("Location", "") or "").strip()
             except (TimeoutError, aiohttp.ClientError, OSError) as exc:
                 # 单跳失败不是登录失败，继续试下一跳
-                self._记轨迹(
-                    f"{_短(当前)} -> 网络异常 {type(exc).__name__}: {exc}"
-                )
+                self._记轨迹(f"{_短(当前)} -> 网络异常 {type(exc).__name__}: {exc}")
                 break
 
             if not 下一位:
@@ -371,16 +369,12 @@ class 扫码会话:
                     正文 = await 响应.text(errors="ignore")
                     状态 = 响应.status
             except (TimeoutError, aiohttp.ClientError, OSError) as exc:
-                self._记轨迹(
-                    f"密钥({来源})换取异常 {type(exc).__name__}: {exc}"
-                )
+                self._记轨迹(f"密钥({来源})换取异常 {type(exc).__name__}: {exc}")
                 continue
             回调 = _提auth回调(正文)
             凭据 = _从地址提凭据(回调)
             if 凭据:
-                self._记轨迹(
-                    f"密钥({来源})换取成功，状态{状态} 正文{len(正文)}字"
-                )
+                self._记轨迹(f"密钥({来源})换取成功，状态{状态} 正文{len(正文)}字")
                 return 凭据
         self._记轨迹(f"{len(候选)} 个密钥候选都没换出凭据")
         return None

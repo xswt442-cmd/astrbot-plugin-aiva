@@ -50,9 +50,7 @@ class Test从提及里找对手:
         assert 从提及里找对手(原始) is None
 
     def test_机器人和对手都在时取对手(self):
-        原始 = 假原始消息(
-            [假提及("机器人_id", is_you=True), 假提及("YJJ_openid_123456")]
-        )
+        原始 = 假原始消息([假提及("机器人_id", is_you=True), 假提及("YJJ_openid_123456")])
         assert 从提及里找对手(原始) == "YJJ_openid_123456"
 
     def test_跳过机器人账号(self):
