@@ -1,0 +1,208 @@
+name: release
+
+# 手动触发。标签和 Release 绑在同一个 job 里：分开做会漏，v0.1.2 与 v0.1.3
+# 就只推了标签、Releases 页面停在 v0.1.1。
+#
+# 合并到 main 之后在 Actions 里跑这个工作流，不要本地打标签。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号，带 v 前缀，如 v0.1.4'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: 打标签并发 Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # 标签要落在 main 的合并提交上。浅克隆默认只有单个 commit，
+          # 不够解析历史，而且下面还要确认标签不在。
+          fetch-depth: 0
+
+      - name: 确认触发的是 main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::发版必须在 main 上触发，当前是 ${{ github.ref }}。"
+          echo "先把 dev 合并进 main，再跑这个工作流。标签打 dev 会让市场拿到没有的代码。"
+          exit 1
+
+      - name: 确认版本号格式
+        env:
+          ver: ${{ inputs.version }}
+        run: |
+          if [[ ! "$ver" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::版本号格式不对：$ver。要像 v0.1.4 这样，带 v 前缀。"
+            exit 1
+          fi
+
+      # 版本号散落在 metadata.yaml 和 CHANGELOG 里，改一处漏一处，市场上就会
+      # 显示一个和包内容对不上的版本号。所以在这里卡住，而不是靠记性。
+      - name: 确认各处版本号一致
+        env:
+          ver: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          bare=${ver#v}
+
+          meta=$(grep -E '^version:' metadata.yaml | awk '{print $2}' || true)
+          if [[ -z "$meta" ]]; then
+            echo "::error::metadata.yaml 里读不到 version 字段。"
+            exit 1
+          fi
+          if [[ "$meta" != "$ver" ]]; then
+            echo "::error::metadata.yaml 是 $meta，要 $ver。"
+            exit 1
+          fi
+
+          if ! grep -qE "^## \[$bare\] - " docs/CHANGELOG.md; then
+            echo "::error::docs/CHANGELOG.md 里没有 $bare 的小节。要写成："
+            echo "  ## [$bare] - YYYY-MM-DD"
+            exit 1
+          fi
+
+          # pyproject.toml 是 TOML，用 `version = "x"`，冒号是 YAML 的写法。
+          # 之前按 metadata.yaml 的格式去 grep，匹配不到；又因为 pipefail，
+          # grep 一失败整步直接退出，连错误提示都打不出来。
+          pkgver=$(grep -E '^version[[:space:]]*=' pyproject.toml | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+          if [[ "$pkgver" != "$bare" ]]; then
+            echo "::error::pyproject.toml 是 $pkgver，要 $bare（两处都不带 v）。"
+            exit 1
+          fi
+          echo "版本号一致：$ver"
+
+      # main 上必须有绿，否则发出去的包是已知坏的。
+      - name: 等 main 的门禁通过
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            state=$(gh run list --branch main --workflow checks --limit 1 \
+              --json conclusion --jq '.[0].conclusion // "in_progress"')
+            echo "main 门禁状态：$state"
+            case "$state" in
+              success) echo "门禁通过"; exit 0 ;;
+              failure|cancelled|timed_out)
+                echo "::error::main 的门禁没过，先修好再发版。"; exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo "::error::等了 10 分钟门禁还没绿，放弃。"
+          exit 1
+
+      - name: 确认标签还不存在
+        env:
+          ver: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git rev-parse "$ver" >/dev/null 2>&1; then
+            echo "::error::$ver 这个标签本地已存在。"
+            echo "标签发布后不能改指向（见 docs/RELEASING.md）。要修正就发新版本号。"
+            exit 1
+          fi
+          if gh release view "$ver" >/dev/null 2>&1; then
+            echo "::error::$ver 的 Release 已存在。"; exit 1
+          fi
+          echo "标签 $ver 未被占用"
+
+      # 打标签前先看一眼包里会带出什么。市场从 main 拉 zip，带进去不该有的
+      # 文件要等发出去才发现就晚了。
+      - name: 确认发布包内容
+        run: |
+          set -euo pipefail
+          git archive --format=zip --output=/tmp/pkg.zip HEAD
+          echo "包大小：$(du -h /tmp/pkg.zip | cut -f1)（上限 16 MB）"
+          echo "包内清单："
+          unzip -l /tmp/pkg.zip | awk 'NR>3 && NF==4 {print "  " $4}'
+
+          if unzip -l /tmp/pkg.zip | grep -qE 'test/|/\.github/'; then
+            echo "::error::包里带了测试或 CI 配置，检查 .gitattributes 的 export-ignore。"
+            exit 1
+          fi
+          if ! unzip -l /tmp/pkg.zip | grep -q 'logo.png'; then
+            echo "::error::包里没有 logo.png，AstrBot 硬编码要这个文件名，缺了列表不显示图标。"
+            exit 1
+          fi
+
+          bytes=$(stat -c%s /tmp/pkg.zip)
+          if (( bytes > 16 * 1024 * 1024 )); then
+            echo "::error::包超过 16 MB，市场会拒绝发布。"
+            exit 1
+          fi
+
+      - name: 打标签并推送
+        env:
+          ver: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # 显式写 main，不给 HEAD 所在位置打标签：squash 或 rebase 合并会
+          # 把分支提交换成 main 上的新提交，在分支提交上打的标签从 main 不可达。
+          #
+          # 身份要在这里配。checkout 只配了认证用的凭据，没配 user.name 与
+          # user.email，而打标签是写操作、要生成 tagger，缺身份直接报
+          # "Committer identity unknown" 退出 128。
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$ver" main -m "$ver"
+          git push origin "$ver"
+
+      - name: 建 Release
+        env:
+          ver: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bare=${ver#v}
+          # 说明直接取 CHANGELOG 对应小节，两边不会漂。
+          #
+          # 这个文件里所有变量名都是 ASCII。GitHub runner 的 bash 和 awk 都不接受
+          # 非 ASCII 标识符：bash 报 command not found 且 $变量 静默展开成空，
+          # awk 报 invalid char。曾用中文变量名连踩两次，约束由
+          # test/test_workflow_shell.py 检查。echo 里的中文不受限制。
+          {
+            echo "## [$bare]"
+            echo
+            awk -v v="$bare" '
+              $0 ~ "^## \\[" v "\\]" { grab = 1; next }
+              grab && /^## \[/ { exit }
+              grab { print }
+            ' docs/CHANGELOG.md
+          } > /tmp/notes.md
+
+          if [[ ! -s /tmp/notes.md ]]; then
+            echo "::error::从 CHANGELOG 抽不出 $bare 的小节内容。"
+            cat /tmp/notes.md
+            exit 1
+          fi
+
+          gh release create "$ver" --title "$ver" --notes-file /tmp/notes.md
+
+      - name: 核对
+        env:
+          ver: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          if [[ "$latest" != "$ver" ]]; then
+            echo "::error::最新的 Release 是 $latest，不是 $ver。"
+            exit 1
+          fi
+          echo "Release $ver 已发布且为 Latest"
+          echo "https://github.com/${{ github.repository }}/releases/tag/$ver"
+          echo
+          echo "还没进 AstrBot 插件市场：到 https://cloud.astrbot.app/publish 填本仓库地址提交。"
