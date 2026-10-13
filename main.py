@@ -106,7 +106,7 @@ class _落空兜底(CustomFilter):
         # custom_filter_ok 再检查组名），所以第一件事是判断关不关我事。
         if not 以组名开头(文本, _组名):
             return True
-        logger.info(f"[aiva] 指令命中 message_str={文本!r}")
+        logger.debug(f"[aiva] 指令命中 message_str={文本!r}")
         if 是否落空(文本, _组名):
             event.set_result(
                 MessageEventResult().message(落空提示(取落空参数(文本, _组名)))
@@ -170,6 +170,15 @@ class Main(Star):
                     f"生成二维码失败（{exc}）。腾讯那边可能改了登录页，稍后再试。"
                 )
                 return
+            except Exception as exc:  # noqa: BLE001
+                # aiohttp 的连接错、解析错等等一律翻译成人话。
+                # 让它冒到框架手上，用户看到的是「在调用插件 astrbot_plugin_aiva
+                # 的处理函数 绑定 时出现异常」加一段 traceback——毫无信息量。
+                logger.warning(f"[aiva] 出码异常：{type(exc).__name__}: {exc}")
+                yield event.plain_result(
+                    "生成二维码时网络出错了，稍后再试。（扫不上不是你的问题。）"
+                )
+                return
 
             from astrbot.core.message.components import Image, Plain
 
@@ -187,6 +196,12 @@ class Main(Star):
                 except RuntimeError as exc:
                     yield event.plain_result(f"扫码失败：{exc}。重新发 /爱瓦 绑定。")
                     return
+                except asyncio.TimeoutError:
+                    # 扫码期间网络抖一下不该把整条指令炸掉——那会在群里弹出
+                    # 「在调用插件 astrbot_plugin_aiva 的处理函数 绑定 时出现异常」。
+                    # 单次失败按「还没扫完」处理，继续轮询。
+                    logger.warning("[aiva] 扫码轮询超时，继续等")
+                    continue
                 if 结果:
                     break
             else:
@@ -199,6 +214,10 @@ class Main(Star):
             except 业务错误 as exc:
                 logger.warning(f"[aiva] 换票失败：{exc}")
                 yield event.plain_result(f"登录成功但换取接口凭证失败：{exc}")
+                return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[aiva] 换票异常：{type(exc).__name__}: {exc}")
+                yield event.plain_result("扫码成功了，但换取接口凭证时网络出错，请重试。")
                 return
 
             if not 凭据是否齐全(凭据):

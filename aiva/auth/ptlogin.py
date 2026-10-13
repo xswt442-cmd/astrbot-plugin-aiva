@@ -48,6 +48,10 @@ _APPID = "716027609"
 _DAID = "381"
 _第三方AID = "102061775"
 
+# 跳转链每一跳单独给 5 秒。会话的 total=20 是单条请求预算，而 _追跳转 最多走
+# 5 跳，沿用值得100 秒——用户在群里发一句话就能把sock_connect 打断。
+_跳转超时 = 5.0
+
 _UA = (
     "Mozilla/5.0 (Linux; Android 12; 23117RK66C Build/V417IR; wv) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 "
@@ -218,7 +222,16 @@ class 扫码会话:
         return None
 
     async def _追跳转(self, 地址: str, 最多: int = 5) -> 扫码结果 | None:
-        """跟着跳转链走，从 auth:// 回调里捞出 openid 与 access_token。"""
+        """跟着跳转链走，从 auth:// 回调里捞出 openid 与 access_token。
+
+        每一跳都套自己的短超时：会话的 `total=20` 是**整条请求**的预算，
+        而这里最多走 5 跳，用会话默认值得 100 秒——用户在群里发一句话
+        就能把 `sock_connect` 打断，冒出来的 `asyncio.TimeoutError` 会
+        一路穿透到 handler，把整条指令炸成「调用插件时出现异常」。
+
+        超时/网络抖动按「这一跳没拿到」处理，不当致命错误：继续走下一跳，
+        全部走完拿不到凭据就返回 None，让调用方按「还没扫完」处理。
+        """
         if self._会话 is None:
             return None
         当前 = 地址
@@ -232,16 +245,23 @@ class 扫码会话:
                 return 凭据
             if 当前.startswith("auth://"):
                 break
-            async with self._会话.get(
-                当前,
-                allow_redirects=False,
-                headers={**_通用头, "Referer": _XLOGIN, "Accept": "*/*"},
-            ) as 响应:
-                正文 = await 响应.text(errors="ignore")
-                下一位 = (响应.headers.get("Location", "") or "").strip()
-                if 下一位:
-                    当前 = 下一位
-                    continue
+            正文 = ""
+            下一位 = ""
+            try:
+                async with self._会话.get(
+                    当前,
+                    allow_redirects=False,
+                    headers={**_通用头, "Referer": _XLOGIN, "Accept": "*/*"},
+                    timeout=aiohttp.ClientTimeout(total=_跳转超时),
+                ) as 响应:
+                    正文 = await 响应.text(errors="ignore")
+                    下一位 = (响应.headers.get("Location", "") or "").strip()
+            except (TimeoutError, aiohttp.ClientError, OSError):
+                # 单跳失败不是登录失败，继续试下一跳
+                break
+            if 下一位:
+                当前 = 下一位
+                continue
             m = re.search(r"(auth://tauth\.qq\.com/[^\s\"'<>]+)", 正文.replace("\\/", "/"))
             if m:
                 凭据 = _从地址提凭据(m.group(1))
