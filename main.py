@@ -35,6 +35,13 @@ from .aiva.兜底 import 取落空参数, 是否落空, 落空提示
 
 _组名 = "爱瓦"
 
+# 组名别名。用户习惯写 `/爱瓦 绑定`，但 QQ 官方适配器在「@机器人 + 指令」
+# 这条路径上走的是 At 唤醒分支——`waking_check/stage.py` 的At 分支只置
+# `wake_prefix = ""`，**不剥掉 message_str 里的 `/`**（只有 startswith 分支才剥）。
+# 于是 message_str 仍是 `/爱瓦 绑定`，组名 `爱瓦` 匹配不上，整条指令静默失败。
+# 加一个带斜杠的别名，两种写法都能进。
+_组别名 = {f"/{_组名}"}
+
 # 扫码轮询：每 2 秒一次，最多 25 次。二维码约 60 秒失效，取 50 秒就不会
 # 让用户对着一张已经不能扫的图继续等。
 _轮询间隔 = 2.0
@@ -107,7 +114,7 @@ class Main(Star):
     # 别写成 `self.爱瓦.add_custom_filter(...)`——`self.爱瓦` 是
     # `RegisteringCommandable`，没有那个方法，加载时会 AttributeError。
     @custom_filter(_落空兜底)
-    @command_group(_组名)
+    @command_group(_组名, alias=_组别名)
     def 爱瓦(self):
         """无畏契约国服战绩查询。指令都在这个组下，不占用通用名字。"""
 
