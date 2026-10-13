@@ -38,7 +38,14 @@ from .aiva.storage import (
     该提醒重绑,
     记绑定时间,
 )
-from .aiva.transport import 业务错误, 挂日志, 取对局, 掌瓦传输, 登录过期
+from .aiva.transport import (
+    业务错误,
+    挂日志,
+    取对局,
+    取段位,
+    掌瓦传输,
+    登录过期,
+)
 from .aiva.兜底 import 以组名开头, 取落空参数, 是否落空, 落空提示
 
 _组名 = "爱瓦"
@@ -437,7 +444,7 @@ class Main(Star):
 
         if 凭据 and 凭据是否齐全(凭据):
             try:
-                原始的对局 = await 取对局(凭据)
+                原始的对局, _角色 = await 取对局(凭据)
                 摘要 = 聚合(原始的对局)
             except Exception as exc:  # noqa: BLE001 - 推演不因查不到就停
                 logger.info(f"[aiva] 开一局读战绩失败，按默认水平：{exc}")
@@ -486,8 +493,8 @@ class Main(Star):
         乙名 = f"对手{凭据摘要(乙凭据)}"
 
         try:
-            甲列表 = await 取对局(甲凭据)
-            乙列表 = await 取对局(乙凭据)
+            甲列表, 甲角色 = await 取对局(甲凭据)
+            乙列表, 乙角色 = await 取对局(乙凭据)
         except 登录过期:
             yield event.plain_result("有人的登录态失效了，请重新 /爱瓦 绑定。")
             return
@@ -518,8 +525,8 @@ class Main(Star):
                     乙名,
                     对比文本(要点, 甲名, 乙名),
                     占优项数(要点, 甲名, 乙名),
-                    近况文本(甲摘要),
-                    近况文本(乙摘要),
+                    近况文本(甲摘要, 取段位(甲角色)),
+                    近况文本(乙摘要, 取段位(乙角色)),
                 ),
             )
         except Exception as exc:
@@ -551,7 +558,7 @@ class Main(Star):
             raise 这句给用户("还没绑定。发 /爱瓦 绑定 扫码登录。")
 
         try:
-            原始列表 = await 取对局(凭据)
+            原始列表, 角色 = await 取对局(凭据)
         except 登录过期 as exc:
             raise 这句给用户("登录态失效了，请重新 /爱瓦 绑定。") from exc
         except 业务错误 as exc:
@@ -566,7 +573,7 @@ class Main(Star):
                 "接口没返回可统计的对局。可能是这个号还没打过竞技/普通模式，"
                 "或者最近的对局被隐私设置挡住了。"
             )
-        return 近况文本(摘要), 摘要
+        return 近况文本(摘要, 取段位(角色)), 摘要
 
     async def _问模型(self, event: AstrMessageEvent, 提示: str) -> str:
         """用当前会话的模型问一句话，返回它写的内容。

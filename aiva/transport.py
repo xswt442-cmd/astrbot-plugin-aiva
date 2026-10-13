@@ -22,7 +22,13 @@ from typing import Any
 
 import aiohttp
 
-__all__ = ["掌瓦传输", "业务错误", "登录过期", "取对局"]
+__all__ = [
+    "掌瓦传输",
+    "业务错误",
+    "登录过期",
+    "取对局",
+    "取段位",
+]
 
 _接口根 = "https://app.mval.qq.com"
 _通用查询 = "source_game_zone=agame&game_zone=agame"
@@ -85,8 +91,10 @@ def 拼Cookie(凭据: dict[str, Any]) -> str:
     return "; ".join(段)
 
 
-async def 取对局(凭据: dict[str, Any], 每页: int = 20) -> list[dict[str, Any]]:
-    """取这个用户的近期对局列表。
+async def 取对局(
+    凭据: dict[str, Any], 每页: int = 20
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """取这个用户的近期对局列表，外加角色信息。
 
     **一个都不能少**：这个函数会自己先打一次主角色接口拿 `scene` 和
     `game_role_id`，再拿它们去要对局列表。这两个参数缺任何一个，腾讯都回
@@ -94,11 +102,24 @@ async def 取对局(凭据: dict[str, Any], 每页: int = 20) -> list[dict[str, 
     要重新扫码，其实是自己的锅，重扫一百次也没用。
 
     所以调用方只用管传凭据，别自己去拼这个请求体。
+
+    角色信息（`tier_text` 就是段位，如「钻石II」）一起返回：锐评的提示词
+    要求称号里带段位，但段位**不在对局列表里**，只在这里。以前没返回，
+    模型就自己编了一个——线上真出过钻石玩家被评成「铂金」。
     """
     传输 = 掌瓦传输()
-    _, 场景, 角色ID = await 传输.取角色上下文(凭据)
+    角色, 场景, 角色ID = await 传输.取角色上下文(凭据)
     数据 = await 传输.取对局列表(凭据, 场景, 角色ID, 每页=每页)
-    return 数据.get("battle_list") or 数据.get("list") or []
+    return (数据.get("battle_list") or 数据.get("list") or []), 角色
+
+
+def 取段位(角色: dict[str, Any]) -> str:
+    """从主角色返回里取段位文字，没有就返回空串。
+
+    只认 `tier_text`（「钻石II」这种带小段的）。`tier` 是数字档位，
+    映射表得自己维护，猜错就是又一句编的段位。
+    """
+    return str(角色.get("tier_text") or "").strip()
 
 
 _日志钩子: Callable[[str], None] | None = None
