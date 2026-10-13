@@ -4,7 +4,7 @@ short_desc: 查无畏契约国服战绩，让模型替你锐评。
 desc: 扫码绑定掌上无畏契约账号后，读取玩家自己的段位与战绩数据，交给大模型做锐评和玩家画像。
 version: v0.1.0
 author: xswt442-cmd
-repo: https://github.com/xswt442-cmd/astrbot-plugin-aiva
+repo: https://github.com/xswt442-cmd/astrbot_plugin_aiva
 astrbot_version: ">=4.16,<5"
 # 市场分类。取值是市场自己定的那几个中文，见 docs/RELEASING.md。
 # 查个人战绩属于游戏数据查询，同类插件都归娱乐。不填会被默认成「其他」。
