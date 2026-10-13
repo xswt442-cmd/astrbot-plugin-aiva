@@ -14,8 +14,19 @@ AstrBot 插件市场从仓库的 `metadata.yaml` 读插件信息，版本号也�
    uv run ruff format --check .
    ```
 
-2. 改 `metadata.yaml` 的 `version`。版本号带 `v` 前缀，与 `metadata.yaml`
-   现有格式一致。
+2. **版本号有三处，一起改**：
+
+   | 文件 | 形式 | 谁读 |
+   | --- | --- | --- |
+   | `metadata.yaml` | `v0.2.0`（**带 `v` 前缀**） | 插件市场 |
+   | `pyproject.toml` | `0.2.0`（不带前缀） | 本地构建与打包 |
+   | `uv.lock` | `0.2.0`（`uv lock` 生成） | 锁定依赖 |
+
+   只改 `metadata.yaml` 就能过本地 `pytest` 之外的检查，但**推不上去**——
+   `test/test_metadata.py::test_三处版本号一致` 会在 pre-push 钩子里拦下。
+   改完 `pyproject.toml` 记得跑 `uv lock` 让 lock 跟上。
+
+   这三处曾经漏过两处，是 pre-push 钩子拦下来的，不是人发现的。
 
 3. 在 `docs/CHANGELOG.md` 顶部加一节，写清这一版有什么变化。只写当前存在的
    变化，不记录已删除的尝试与此前被否决的方案。
