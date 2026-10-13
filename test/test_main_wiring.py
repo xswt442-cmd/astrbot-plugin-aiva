@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -175,6 +176,93 @@ class Test凭据不外泄:
         # 直接把 dict 丢进 f-string 会把四样全打印出来。
         for 参数 in _日志调用():
             assert not any(f"{{{名}}}" in 参数 for 名 in ("凭据",))
+
+
+class Test源码卫生:
+    """两类只在运行时才炸、本地又跑不到的写法。
+
+    都不是靠读代码能稳定发现的：漏 f 前缀的字符串**语法完全合法**，只有用户
+    看到「「{关键词}」匹配到几个人」时才知道出事了；except 里读 try 体内才绑
+    定的变量同样合法，只有异常真发生时才 `UnboundLocalError`——而那条分支走的
+    是「对方登录态过期」，测试环境根本碰不到。
+    """
+
+    def test_没有漏f前缀的字符串(self):
+        """字符串里出现 `{名字}` 形状却不是 f-string，就是漏了前缀。"""
+        占位 = re.compile(r"\{[^{}\n]{1,40}\}")
+        漏 = []
+        for 节点 in ast.walk(_树()):
+            if not isinstance(节点, ast.Constant) or not isinstance(节点.value, str):
+                continue
+            for 命中 in 占位.finditer(节点.value):
+                漏.append((节点.lineno, 命中.group(0)))
+        assert not 漏, f"这些字符串里的占位符不会被替换（漏了 f 前缀）：{漏}"
+
+    def test_except里不读try体内才绑定的变量(self):
+        """`甲列表` 那种：`取对局` 抛异常时它还没绑上，except 里一读就炸。
+
+        线上真出过：PK 时对方登录态过期，本该回一句「对方登录态失效」，
+        实际抛 `UnboundLocalError`，用户只看到机器人没反应。
+        """
+        问题 = []
+        for 函数 in _顶层函数():
+            for 函数名, 行号, 名字 in _未绑定读取(函数):
+                问题.append(f"{函数名} 第{行号}行 except 里读了 {sorted(名字)}")
+        assert not 问题, "\n".join(问题)
+
+
+def _顶层函数() -> list[ast.AsyncFunctionDef | ast.FunctionDef]:
+    return [
+        节点
+        for 节点 in ast.walk(_树())
+        if isinstance(节点, (ast.AsyncFunctionDef, ast.FunctionDef))
+    ]
+
+
+def _绑定的(节点们: list[ast.AST]) -> set[str]:
+    出: set[str] = set()
+    for 节点 in 节点们:
+        for 子 in ast.walk(节点):
+            if isinstance(子, ast.Name) and isinstance(子.ctx, ast.Store):
+                出.add(子.id)
+            if isinstance(子, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                出.add(子.name)
+            if isinstance(子, ast.ExceptHandler) and 子.name:
+                出.add(子.name)
+    return 出
+
+
+def _未绑定读取(函数: ast.AsyncFunctionDef | ast.FunctionDef) -> list[tuple[str, int, set]]:
+    """找出 `except` 里读了「同一个 try 体内才绑定」的变量的地方。"""
+    报告: list[tuple[str, int, set]] = []
+    已绑 = {参数.arg for 参数 in 函数.args.args}
+
+    def 扫(节点们: list[ast.stmt]) -> None:
+        for 节点 in 节点们:
+            if isinstance(节点, ast.Try):
+                体内 = _绑定的(节点.body)
+                for 处理 in 节点.handlers:
+                    读到 = {
+                        子.id
+                        for 子 in ast.walk(处理)
+                        if isinstance(子, ast.Name) and isinstance(子.ctx, ast.Load)
+                    }
+                    可疑 = (读到 & 体内) - 已绑
+                    if 可疑:
+                        报告.append((函数.name, 节点.lineno, 可疑))
+                扫(节点.body)
+                for 处理 in 节点.handlers:
+                    扫(处理.body)
+                    已绑.update(_绑定的(处理.body))
+                扫(节点.orelse)
+                扫(节点.finalbody)
+                已绑.update(体内)
+            elif hasattr(节点, "body") and isinstance(节点.body, list):
+                已绑.update(_绑定的([节点]))
+                扫(节点.body)
+
+    扫(函数.body)
+    return 报告
 
 
 class Test导入齐全:

@@ -42,6 +42,9 @@ _绑定期秒 = 12 * 3600
 # 必备字段
 _必备字段 = ("openid", "access_token", "userId", "tid")
 
+# PK 名字要念进提示词里，太长会挤掉版面。与 `main.py` 的校验同一个值。
+_昵称上限 = 16
+
 
 def 凭据是否齐全(凭据: dict[str, Any] | None) -> bool:
     if not 凭据:
@@ -75,9 +78,6 @@ def 记昵称(凭据: dict[str, Any], 昵称: str) -> dict[str, Any]:
     if 值:
         凭据["昵称"] = 值[:_昵称上限]
     return 凭据
-
-
-_昵称上限 = 32
 
 
 def 找同名的人(仓库: 凭据仓库, 关键词: str, *, 自己: str = "") -> list[tuple[str, str]]:

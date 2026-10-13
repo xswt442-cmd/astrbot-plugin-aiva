@@ -11,7 +11,6 @@ API：Riot 官方 API 只覆盖国际服，`api.riotgames.cn` 实测 DNS 无记�
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 import re
 import time
@@ -20,7 +19,7 @@ from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.event.filter import command_group, custom_filter
+from astrbot.api.event.filter import command_group, custom_filter, llm_tool
 from astrbot.api.star import Context, Star
 from astrbot.core.platform.astr_message_event import MessageEventResult
 from astrbot.core.star.filter.command import GreedyStr
@@ -508,6 +507,19 @@ class Main(Star):
             return
         yield event.plain_result(数据[0])
 
+    @llm_tool(name="get_valorant_profile")
+    async def 查询玩家画像(self, event: AstrMessageEvent) -> str:
+        """读取提问者自己绑定的《无畏契约》国服账号战绩，并给出结构化摘要。
+
+        Returns:
+            胜负与胜率、场均 K/D/A、KDA、ACS、回合净胜、最近走势、地图与
+            常用特工等统计结果。未绑定或登录态失效时返回说明文字。
+        """
+        try:
+            return (await self._取近期战绩(event.get_sender_id()))[0]
+        except 这句给用户 as exc:
+            return str(exc)
+
     @爱瓦.command("锐评")
     async def 锐评(self, event: AstrMessageEvent):
         """让模型基于近期数据写一段锐评。"""
@@ -571,26 +583,12 @@ class Main(Star):
         原始 = getattr(消息, "raw_message", None)
         正文 = str(getattr(event, "message_str", "") or "")
 
-        # QQ 官方机器人**收不到 @别人**：`raw_message.mentions` 实测是 `[]`，
-        # 平台压根没把被 @ 的人传下来（不是适配器过滤，是服务端没给）。
-        # 但适配器把 QQ 原始 payload 存进了 `raw_message.raw_data`，
-        # 还有 `msg_elements`——@ 元素应该在那里面。
-        载荷 = getattr(原始, "raw_data", None) or {}
-        元素 = json.dumps(getattr(原始, "msg_elements", None), ensure_ascii=False)[:400]
-        logger.info(
-            f"[aiva] PK 找对手：自己={自己!r}"
-            f"\n  mentions={提及摘要(原始)!r}"
-            f"\n  msg_elements={元素!r}"
-            f"\n  raw_data 键={list(载荷.keys())!r}"
-            f"\n  raw_data.content={载荷.get('content')!r}"
-            f"\n  message_str={正文[:120]!r}"
-        )
-
         对手标识 = 从原始载荷认对手(原始, 自己=自己, 机器人=机器人)
-        来源 = "raw_data"
+        来源 = "原始报文"
+        对手昵称 = ""
         if not 对手标识:
             对手标识 = 从提及里找对手(原始, 自己=自己, 机器人=机器人)
-            来源 = "mentions"
+            来源 = "提及列表"
         if not 对手标识:
             对手标识 = 找对手(
                 getattr(消息, "message", None) or [],
@@ -603,24 +601,34 @@ class Main(Star):
             关键词 = _PK里的名字(正文)
             候选 = 找同名的人(self._凭据, 关键词, 自己=自己) if 关键词 else []
             if len(候选) == 1:
-                对手标识, 来源 = 候选[0][0], "昵称"
+                对手标识, 对手昵称 = 候选[0]
+                来源 = "昵称"
             elif len(候选) > 1:
                 yield event.plain_result(
-                    "「{关键词}」匹配到几个人，说清楚点：\n"
+                    f"有 {len(候选)} 个人叫「{关键词}」，分不清是哪个：\n"
                     + "\n".join(f"· {名}" for _, 名 in 候选)
+                    + "\n让他发 /爱瓦 昵称 换个更特别的，或者你把名字写完整一点。"
                 )
                 return
             elif 关键词:
-                yield event.plain_result(f"没找到叫「{关键词}」的绑定用户。让他先发 /爱瓦 绑定。")
+                yield event.plain_result(
+                    f"没找到叫「{关键词}」的人。他得先自己发 /爱瓦 绑定，"
+                    "再发 /爱瓦 昵称 设一个名字。"
+                )
                 return
 
-        logger.info(f"[aiva] PK 认出对手={对手标识!r}（来源={来源}）")
+        # 认不出对手时把拿到的东西记下来。QQ 官方机器人**收不到 @别人**：
+        # `raw_message.mentions` 实测是 `[]`，平台压根没把被 @ 的人传下来。
+        # 只记能定位问题的字段，不落消息正文与原始报文内容。
+        logger.info(
+            f"[aiva] PK 找对手：自己={自己!r} 认出={对手标识!r} 来源={来源} 提及={提及摘要(原始)!r}"
+        )
         if not 对手标识:
             yield event.plain_result(
-                "没认出要和谁比。\n"
-                "发「**/爱瓦 PK 群友昵称**」——直接写名字最稳。\n\n"
-                "（QQ 官方机器人收不到 @别人，插件这边确实拿不到 @ 出来"
-                "那个人的身份。）\n"
+                "没认出要和谁比。发「/爱瓦 PK <名字>」最稳——对方发过 "
+                "/爱瓦 昵称 <名字> 就能被点到。\n"
+                "QQ 官方机器人收不到 @别人，被 @ 的人的标识平台根本没传下来，"
+                "这条路走不通。\n"
                 "对方得自己发过 /爱瓦 绑定，插件不会替你去查别人。"
             )
             return
@@ -630,27 +638,41 @@ class Main(Star):
             yield event.plain_result("对方还没绑定，比不了。让他自己发 /爱瓦 绑定。")
             return
 
-        甲名 = self._名字(event) or "你"
-        乙名 = f"对手{凭据摘要(乙凭据)}"
+        # 念名字优先用各人自己设的 PK 名字，那是群里点人时用的称呼。
+        甲名 = self._对战名(甲凭据, self._名字(event), "你")
+        乙名 = self._对战名(乙凭据, 对手昵称, f"对手{凭据摘要(乙凭据)}")
 
+        # 两边分开取，失败时要说清是谁的登录态挂了——只挂一边却让两个人
+        # 都去重扫，一半的人白扫一次。合成一个 try 是做不到的：第一句抛异常
+        # 时 `甲列表` 还没绑上，except 里再去读它只会 UnboundLocalError。
         try:
             甲列表, 甲角色 = await 取对局(甲凭据)
-            乙列表, 乙角色 = await 取对局(乙凭据)
         except 登录过期:
-            # 说清是谁的：两边都挂了才说「有人」，只挂一边就把那个人点出来，
-            # 否则两个人都得重扫一遍。
             yield event.plain_result(
                 f"**{甲名}** 的登录态失效了。发 /爱瓦 绑定 重新扫码就行，不用先解绑。"
-                if not 甲列表
-                else f"**{乙名}** 的登录态失效了。让他发 /爱瓦 绑定 重新扫码。"
             )
             return
         except 业务错误 as exc:
             yield event.plain_result(f"接口不给数据：{exc}")
             return
         except Exception as exc:
-            logger.warning(f"[aiva] PK 取数据失败：{type(exc).__name__}: {exc}")
-            yield event.plain_result(f"取战绩失败：{exc}")
+            logger.warning(f"[aiva] PK 取自己战绩失败：{type(exc).__name__}: {exc}")
+            yield event.plain_result(f"取你的战绩失败：{exc}")
+            return
+
+        try:
+            乙列表, 乙角色 = await 取对局(乙凭据)
+        except 登录过期:
+            yield event.plain_result(
+                f"**{乙名}** 的登录态失效了。让他发 /爱瓦 绑定 重新扫码，不用先解绑。"
+            )
+            return
+        except 业务错误 as exc:
+            yield event.plain_result(f"接口不给数据：{exc}")
+            return
+        except Exception as exc:
+            logger.warning(f"[aiva] PK 取对手战绩失败：{type(exc).__name__}: {exc}")
+            yield event.plain_result(f"取对方的战绩失败：{exc}")
             return
 
         甲摘要 = 聚合(甲列表)
@@ -699,6 +721,15 @@ class Main(Star):
         except Exception:
             return ""
         return 名字[:_昵称上限]
+
+    @staticmethod
+    def _对战名(凭据: dict[str, Any], 平台显示名: str, 兜底: str) -> str:
+        """PK 时念出来的名字。
+
+        优先用他自己在 `/爱瓦 昵称` 里设的名字——那是群里点人时用的称呼，
+        而平台给的显示名在 QQ 官方上是 QQ 昵称而不是群昵称，常常点不到人。
+        """
+        return str(凭据.get("昵称") or "").strip() or 平台显示名.strip() or 兜底
 
     async def _绑定还活着(self, 凭据: dict[str, Any]) -> bool:
         """这份绑定的登录态还能不能取到战绩。
