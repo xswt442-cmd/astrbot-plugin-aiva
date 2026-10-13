@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from aiva.auth.ptlogin import _从地址提凭据, _正文里的下一跳, 扫码结果
+from aiva.auth.ptlogin import _从地址提凭据, _正文里的下一跳, 扫码结果, 扫码会话
 
 
 class Test正文里的下一跳:
@@ -103,3 +103,178 @@ class Test会话留轨迹:
         ).read_text(encoding="utf-8")
         assert "最多: int = 12" in 源码
         assert "_记轨迹" in 源码
+
+class Test拼openlogin_data:
+    """漏了 pt_openlogin_data，腾讯会回 code=0 但拿不到 token。
+
+    这是整条链路最阴的坑：没有任何报错，只是静默少一半信息。
+    """
+
+    @pytest.mark.asyncio
+    async def test_拼出29项(self):
+        import aiohttp
+
+        from aiva.auth.ptlogin import _拼openlogin_data
+
+        会话 = 扫码会话()
+        async with aiohttp.ClientSession(
+            cookie_jar=aiohttp.CookieJar(unsafe=True)
+        ) as 裸:
+            会话._会话 = 裸
+            数据 = _拼openlogin_data(会话)
+        字段 = dict(pair.split("=", 1) for pair in 数据.split("&"))
+        # 31 项：which/refer_cgi/.../loginty。少一项腾讯就少一半信息。
+        assert len(字段) == 31, f"openlogin_data 字段数变了：{len(字段)}"
+        assert 字段["openapi"] == "1011"
+        assert 字段["has_auth"] == "1"
+        assert 字段["update_auth"] == "1"
+        assert 字段["page_type"] == "1"
+        assert 字段["pf"] == "openmobile_android"
+        assert 字段["response_type"] == "token"
+        assert 字段["redirect_uri"].startswith("auth%3A%2F%2Ftauth.qq.com")
+        assert 字段["client_id"] == "102061775"
+
+    @pytest.mark.asyncio
+    async def test_从xlogin查询串回读(self):
+        """refer_cgi / sdkv / h5sig 等要跟 xlogin 的参数对齐。"""
+        import aiohttp
+
+        from aiva.auth.ptlogin import _拼openlogin_data
+
+        会话 = 扫码会话()
+        async with aiohttp.ClientSession(
+            cookie_jar=aiohttp.CookieJar(unsafe=True)
+        ) as 裸:
+            会话._会话 = 裸
+            字段 = dict(p.split("=", 1) for p in _拼openlogin_data(会话).split("&"))
+        assert 字段["refer_cgi"] == "m_authorize"
+        assert 字段["sdkv"] == "3.5.17.lite"
+        assert 字段["loginty"] == "6"
+        assert 字段["status_os"] == "12"
+
+    def test_轮询必须带上它(self):
+        from pathlib import Path
+
+        源码 = (
+            Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py"
+        ).read_text(encoding="utf-8")
+        assert '"pt_openlogin_data": self._openlogin_data' in 源码
+
+
+class Test提登录sig:
+    def test_优先取页面里的(self):
+        from aiva.auth.ptlogin import _提登录_sig
+
+        页面 = 'g_login_sig=encodeURIComponent("abc%2Fdef")'
+        assert _提登录_sig(页面, 扫码会话()) == "abc/def"
+
+    def test_页面没有就退化到cookie(self):
+        from aiva.auth.ptlogin import _提登录_sig
+
+        类 = 扫码会话()
+        类._取cookie = lambda 名字, 域="": "from-cookie"  # type: ignore[method-assign]
+        assert _提登录_sig("没有这一行", 类) == "from-cookie"
+
+    def test_都没有就空串(self):
+        from aiva.auth.ptlogin import _提登录_sig
+
+        类 = 扫码会话()
+        类._取cookie = lambda 名字, 域="": ""  # type: ignore[method-assign]
+        assert _提登录_sig("", 类) == ""
+
+
+class Test收密钥候选:
+    def test_从查询串收(self):
+        from aiva.auth.ptlogin import _收密钥候选
+
+        类 = 扫码会话()
+        类._取cookie = lambda 名字, 域="": ""  # type: ignore[method-assign]
+        地址 = "https://x.com/y?keystr=KEY123&other=1"
+        候选 = _收密钥候选(类, 地址)
+        assert ("KEY123", "url:keystr") in 候选
+
+    def test_从fragment收(self):
+        from aiva.auth.ptlogin import _收密钥候选
+
+        类 = 扫码会话()
+        类._取cookie = lambda 名字, 域="": ""  # type: ignore[method-assign]
+        候选 = _收密钥候选(类, "https://x.com/y#redirect_uri_key=FRAGKEY")
+        assert ("FRAGKEY", "url:redirect_uri_key") in 候选
+
+    def test_六个同义字段都认(self):
+        from aiva.auth.ptlogin import _收密钥候选, _密钥字段名
+
+        类 = 扫码会话()
+        类._取cookie = lambda 名字, 域="": ""  # type: ignore[method-assign]
+        for 名 in _密钥字段名:
+            候选 = _收密钥候选(类, f"https://x.com/y?{名}=V-{名}")
+            assert (f"V-{名}", f"url:{名}") in 候选, f"{名} 没被收进来"
+
+    def test_去重(self):
+        from aiva.auth.ptlogin import _收密钥候选
+
+        类 = 扫码会话()
+        类._取cookie = lambda 名字, 域="": ""  # type: ignore[method-assign]
+        地址 = "https://x.com/y?keystr=SAME&key=SAME"
+        候选 = _收密钥候选(类, 地址)
+        assert len([c for c in 候选 if c[0] == "SAME"]) == 1
+
+    def test_从cookie收(self):
+        from aiva.auth.ptlogin import _收密钥候选
+
+        类 = 扫码会话()
+        类._取cookie = lambda 名字, 域="": ("CK" if 名字 == "keystr" else "")  # type: ignore[method-assign]
+        候选 = _收密钥候选(类, "")
+        assert any(v == "CK" for v, _ in 候选)
+
+    def test_什么都没有就返回空(self):
+        from aiva.auth.ptlogin import _收密钥候选
+
+        类 = 扫码会话()
+        类._取cookie = lambda 名字, 域="": ""  # type: ignore[method-assign]
+        assert _收密钥候选(类, "") == []
+
+
+class Test提auth回调:
+    def test_读Callback包装的JSON(self):
+        from aiva.auth.ptlogin import _提auth回调
+
+        正文 = '_Callback({"url":"auth://tauth.qq.com/?#access_token=T&openid=O"});'
+        回调 = _提auth回调(正文)
+        assert 回调.startswith("auth://")
+        assert "access_token=T" in 回调
+
+    def test_JSON坏了退回正则(self):
+        from aiva.auth.ptlogin import _提auth回调
+
+        正文 = '_Callback({坏掉的 JSON); auth://tauth.qq.com/?#access_token=T&openid=O'
+        回调 = _提auth回调(正文)
+        assert 回调.startswith("auth://")
+
+    def test_URL字段不是auth开头就不要(self):
+        from aiva.auth.ptlogin import _提auth回调
+
+        assert _提auth回调('_Callback({"url":"https://evil.com"});') == ""
+
+    @pytest.mark.parametrize("正文", ["", "什么都没有"])
+    def test_没回调返回空(self, 正文: str):
+        from aiva.auth.ptlogin import _提auth回调
+
+        assert _提auth回调(正文) == ""
+
+
+class Test换回调链路:
+    def test_地址是openmobile不带4(self):
+        """`openmobile.qq.com` 能正常解析；带 4 的那个在内网被屏蔽。"""
+        from aiva.auth.ptlogin import _换回调地址
+
+        assert _换回调地址 == "https://openmobile.qq.com/oauth2.0/m_get_redirect_url"
+
+    def test_用密钥换凭据被调用(self):
+        """跟完跳转没有 token 时必须走换回调这条路，不能直接抛错。"""
+        from pathlib import Path
+
+        源码 = (
+            Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py"
+        ).read_text(encoding="utf-8")
+        assert "await self._用密钥换凭据(跳转)" in 源码, "必须在抛错前先尝试换回调"

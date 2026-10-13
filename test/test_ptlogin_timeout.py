@@ -120,10 +120,12 @@ class Test跳转超时预算:
         assert "_跳转超时" in 源码
         assert "timeout=aiohttp.ClientTimeout(total=_跳转超时)" in 源码
 
-    def test_跳转超时明显小于会话超时(self):
+    def test_单跳超时给够用(self):
+        """腾讯登录单跳实测约 3 秒，`m_get_redirect_url` 也在 12 秒内，
+        5 秒太紧会把本来能成的跳转掐死。"""
         from aiva.auth.ptlogin import _跳转超时
 
-        assert _跳转超时 <= 10, f"单跳 {_跳转超时} 秒太长，5 跳就过 50 秒了"
+        assert _跳转超时 >= 10, f"单跳 {_跳转超时} 秒不够腾讯登录接口用"
 
     def test_捕获列表含超时(self):
         assert (

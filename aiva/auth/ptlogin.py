@@ -44,13 +44,34 @@ _XLOGIN = (
 )
 _出码地址 = "https://xui.ptlogin2.qq.com/ssl/ptqrshow"
 _轮询地址 = "https://xui.ptlogin2.qq.com/ssl/ptqrlogin"
+# 拿 auth:// 回调的真正入口。`check_sig` 跟到底通常只能拿到一个 keystr，
+# 必须拿这个 keystr 再打一次这里，才能换成带 openid/access_token 的回调。
+# 域名是 `openmobile.qq.com`（不带 4），这个能正常解析。
+_换回调地址 = "https://openmobile.qq.com/oauth2.0/m_get_redirect_url"
+# keystr 可能藏在这些名字里。腾讯这几个名字是同义替换，遍历一遍最省事。
+_密钥字段名 = (
+    "redirect_uri_key",
+    "keystr",
+    "key",
+    "uikey",
+    "superkey",
+    "supertoken",
+)
+# 收集 cookie 时要扫的域。腾讯在多个子域间来回跳，cookie 落在哪都有可能。
+_密钥cookie域 = (
+    "https://xui.ptlogin2.qq.com",
+    "https://ssl.ptlogin2.qq.com",
+    "https://ptlogin4.openmobile.qq.com",
+    "https://openmobile.qq.com",
+    "https://connect.qq.com",
+)
 _APPID = "716027609"
 _DAID = "381"
 _第三方AID = "102061775"
 
 # 跳转链每一跳单独给 5 秒。会话的 total=20 是单条请求预算，而 _追跳转 最多走
 # 5 跳，沿用值得100 秒——用户在群里发一句话就能把sock_connect 打断。
-_跳转超时 = 5.0
+_跳转超时 = 12.0
 
 _UA = (
     "Mozilla/5.0 (Linux; Android 12; 23117RK66C Build/V417IR; wv) "
@@ -107,6 +128,8 @@ class 扫码会话:
         self._登录_sig = ""
         self._jsver = "28d22679"
         self._aegis = ""
+        # 轮询必带。不带它腾讯会回 code=0（看着像成功）但拿不到 token。
+        self._openlogin_data = ""
         # 最近一次轮询拿回来的腾讯原始响应，只给调用方看（打日志 / 排查）。
         self.最近原文 = ""
         # 跳转链的逐跳轨迹（URL / 状态 / 下一跳 / 正文摘要）。
@@ -131,8 +154,9 @@ class 扫码会话:
         async with self._会话.get(_XLOGIN, headers=头) as 响应:
             页面 = await 响应.text(errors="ignore")
 
-        self._登录_sig = self._取cookie("pt_login_sig")
+        self._登录_sig = _提登录_sig(页面, self)
         self._aegis = self._取cookie("__aegis_uid")
+        self._openlogin_data = _拼openlogin_data(self)
         m = re.search(r"/monorepo/([0-9A-Za-z]+)/ptlogin/js/", 页面)
         if m:
             self._jsver = m.group(1)
@@ -182,6 +206,7 @@ class 扫码会话:
             "daid": _DAID,
             "aid": _APPID,
             "pt_3rd_aid": _第三方AID,
+            "pt_openlogin_data": self._openlogin_data,
             "pt_uistyle": "35",
             "jsver": self._jsver,
             "r": str(time.time()),
@@ -226,6 +251,14 @@ class 扫码会话:
         跳转 = m.group(3).replace("\\/", "/").replace("\\x26", "&")
         凭据 = await self._追跳转(跳转)
         if 凭据 and 凭据.openid and 凭据.access_token:
+            return 凭据
+
+        # 走到这里说明「跟跳转」没拿到 token。但**这不代表失败**——
+        # 腾讯的 check_sig 通常只产出一个 keystr，得拿它去换。
+        # 这是整条链路最后也是最容易被漏掉的一步。
+        凭据 = await self._用密钥换凭据(跳转)
+        if 凭据 and 凭据.openid and 凭据.access_token:
+            self._记轨迹(f"用密钥换到了凭据 openid={凭据.openid[:8]}…")
             return 凭据
         # code=0 表示腾讯那边判定「扫了并确认了」，但我们没从跳转链里捞到
         # openid/access_token。这是**我们**的解析问题，不是用户没扫——
@@ -305,22 +338,208 @@ class 扫码会话:
             break
         return None
 
+    async def _用密钥换凭据(self, 地址: str) -> 扫码结果 | None:
+        """拿 keystr 去 `m_get_redirect_url` 换一个带 token 的 auth:// 回调。
+
+        腾讯这套里 `check_sig`（`ptlogin4.openmobile.qq.com`）只负责验签，
+        跟到底拿到的往往是一个 keystr 而不是 token。真正的 token 要拿这个
+        keystr 再打一次 `openmobile.qq.com/oauth2.0/m_get_redirect_url` 才拿得到。
+
+        keystr 可能藏在跳转 URL 的查询串/fragment 里，也可能落在 cookie 里
+        （腾讯跨多个子域跳，cookie 落在哪个域都有可能），所以两个地方都扫，
+        并且六个同义字段名都试一遍。
+        """
+        if self._会话 is None:
+            return None
+        候选 = _收密钥候选(self, 地址)
+        if not 候选:
+            self._记轨迹("跳转链与 cookie 里都没找到 keystr，无法换取回调")
+            return None
+
+        self._记轨迹(f"找到 {len(候选)} 个密钥候选，逐个换回调")
+        for 密钥, 来源 in 候选:
+            try:
+                async with self._会话.get(
+                    _换回调地址,
+                    params={"keystr": 密钥},
+                    headers={
+                        **_通用头,
+                        "Referer": "https://imgcache.qq.com/",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=_跳转超时),
+                ) as 响应:
+                    正文 = await 响应.text(errors="ignore")
+                    状态 = 响应.status
+            except (TimeoutError, aiohttp.ClientError, OSError) as exc:
+                self._记轨迹(
+                    f"密钥({来源})换取异常 {type(exc).__name__}: {exc}"
+                )
+                continue
+            回调 = _提auth回调(正文)
+            凭据 = _从地址提凭据(回调)
+            if 凭据:
+                self._记轨迹(
+                    f"密钥({来源})换取成功，状态{状态} 正文{len(正文)}字"
+                )
+                return 凭据
+        self._记轨迹(f"{len(候选)} 个密钥候选都没换出凭据")
+        return None
+
     def _记轨迹(self, 一句: str) -> None:
         """记一跳。轨迹要留着给调用方打日志，登录态相关的值不能进日志。"""
         self.跳转轨迹.append(一句)
 
-    def _取cookie(self, 名字: str) -> str:
+    def _取cookie(self, 名字: str, 域: str = "") -> str:
+        """按名字取 cookie。
+
+        指定 `域` 时只在这个域下找——腾讯跨多个子域跳，同名的 cookie 可能
+        落在不同域上，不限定就会拿到错的那份。不指定则全域取第一个。
+        """
         if self._会话 is None:
             return ""
+        主机 = urllib.parse.urlparse(域).netloc if 域 else ""
         for cookie in self._会话.cookie_jar:
-            if cookie.key == 名字:
-                return cookie.value or ""
+            if cookie.key != 名字:
+                continue
+            if 主机 and 主机 not in (cookie.get("domain") or "").lstrip("."):
+                continue
+            return cookie.value or ""
         return ""
 
     async def 关闭(self) -> None:
         if self._会话 is not None:
             await self._会话.close()
             self._会话 = None
+
+
+def _收密钥候选(会话: 扫码会话, 地址: str) -> list[tuple[str, str]]:
+    """收集能用来换 auth:// 回调的 keystr。
+
+    三个来源，按可靠性排：跳转 URL 的查询串/fragment → cookie。
+    腾讯这几个字段名是同义替换，一个不行换下一个，所以全收。
+    """
+    候选: list[tuple[str, str]] = []
+    见过: set[str] = set()
+
+    def 加(值: str, 来源: str) -> None:
+        k = (值 or "").strip()
+        if not k or k in 见过:
+            return
+        见过.add(k)
+        候选.append((k, 来源))
+
+    还原 = (地址 or "").replace("\\/", "/").replace("\\x26", "&")
+    解析 = urllib.parse.urlparse(还原)
+    片段 = [解析.query, 解析.fragment]
+    if not 解析.query and not 解析.fragment:
+        片段.append(还原)
+    for 原文 in 片段:
+        if not 原文:
+            continue
+        try:
+            字段 = urllib.parse.parse_qs(原文.replace("#&", "&"), keep_blank_values=True)
+        except Exception:  # noqa: BLE001 - 格式不是 query 就没东西可取
+            continue
+        for 名 in _密钥字段名:
+            值 = 字段.get(名)
+            if 值:
+                加(值[0], f"url:{名}")
+
+    for 域 in _密钥cookie域:
+        for 名 in _密钥字段名:
+            加(会话._取cookie(名, 域), f"cookie:{urllib.parse.urlparse(域).netloc}:{名}")
+
+    return 候选
+
+
+def _提auth回调(正文: str) -> str:
+    """从 `m_get_redirect_url` 的响应里提出 auth:// 回调。
+
+    正常形状是 ``_Callback({... "url": "auth://..." ...})`` 这种 JS 包装的
+    JSON。正则没匹配上就退回直接找 auth:// —— 腾讯改过几次格式，
+    别把代码绑死在某一种上。
+    """
+    if not 正文:
+        return ""
+    m = re.search(r"_Callback\s*\(\s*(\{.*?\})\s*\)\s*;?\s*$", 正文, re.DOTALL)
+    if m:
+        try:
+            import json
+
+            载荷 = json.loads(m.group(1))
+            回调 = str(载荷.get("url", "") or "").strip()
+            if 回调.startswith("auth://"):
+                return 回调
+        except Exception:  # noqa: BLE001 - JSON 坏了就退回正则
+            pass
+    m2 = re.search(r"(auth://tauth\.qq\.com/[^\s\"'<>]+)", 正文)
+    return m2.group(1) if m2 else ""
+
+
+def _提登录_sig(页面: str, 会话: 扫码会话) -> str:
+    """取 login_sig。
+
+    优先从 xlogin 页面里的 ``g_login_sig=encodeURIComponent("...")``拿——
+    这个才是腾讯这轮签发的那一份。cookie 里的 `pt_login_sig` 只作兜底：
+    两者在部分场景下不一致，优先用页面里的。
+    """
+    m = re.search(r'g_login_sig=encodeURIComponent\(\s*"([^"]+)"\s*\)', 页面 or "")
+    if m:
+        return urllib.parse.unquote(m.group(1))
+    return 会话._取cookie("pt_login_sig")
+
+
+def _拼openlogin_data(会话: 扫码会话) -> str:
+    """拼轮询必带的 `pt_openlogin_data`。
+
+    **漏了它腾讯会回 code=0** —— 看着像扫码成功了，实际拿不到 token，
+    表现就是「code=0 但没有 openid/access_token」。这是这条链路最阴的坑：
+    没有任何报错，只是静默地少一半信息。
+
+    字段与取值参照 Shy7777/valshop-daily（MIT）的实现：29 项，
+    其中 13 项从 xlogin 的查询串里回读，其余固定。
+    """
+    查询 = urllib.parse.parse_qs(urllib.parse.urlparse(_XLOGIN).query)
+
+    def q(名: str, 默认: str = "") -> str:
+        值 = 查询.get(名)
+        return 值[0] if 值 else 默认
+
+    tid = 会话._取cookie("idt") or str(int(time.time()))
+    项: list[tuple[str, str]] = [
+        ("which", ""),
+        ("refer_cgi", q("refer_cgi", "m_authorize")),
+        ("response_type", q("response_type", "token")),
+        ("client_id", q("client_id", _第三方AID)),
+        ("state", ""),
+        ("display", ""),
+        ("openapi", "1011"),
+        ("switch", q("switch", "1")),
+        ("src", "1"),
+        ("sdkv", q("sdkv", "3.5.17.lite")),
+        ("sdkp", q("sdkp", "a")),
+        ("tid", tid),
+        ("pf", q("pf", "openmobile_android")),
+        ("need_pay", "0"),
+        ("browser", "0"),
+        ("browser_error", ""),
+        ("serial", ""),
+        ("token_key", ""),
+        ("redirect_uri", q("redirect_uri", "auth://tauth.qq.com/")),
+        ("sign", q("sign", "")),
+        ("time", q("time", "")),
+        ("status_version", ""),
+        ("status_os", q("status_os", "12")),
+        ("status_machine", q("status_machine", "")),
+        ("page_type", "1"),
+        ("has_auth", "1"),
+        ("update_auth", "1"),
+        ("auth_time", str(int(time.time() * 1000))),
+        ("loginfrom", ""),
+        ("h5sig", q("h5sig", "")),
+        ("loginty", q("loginty", "6")),
+    ]
+    return urllib.parse.urlencode(项)
 
 
 def _正文里的下一跳(正文: str) -> str:
