@@ -541,7 +541,7 @@ class Main(Star):
             yield event.plain_result(f"调用模型失败：{exc}")
             return
         if not 结果:
-            yield event.plain_result(f"模型没给出内容。先把数据给你：\n\n{文本}")
+            yield event.plain_result(f"模型没有返回内容。先把数据给你：\n\n{文本}")
             return
         yield event.plain_result(结果)
 
@@ -568,7 +568,7 @@ class Main(Star):
             yield event.plain_result(f"调用模型失败：{exc}")
             return
         if not 结果:
-            yield event.plain_result(f"模型没给出内容。这局的设定：\n\n{设定文本(设定)}")
+            yield event.plain_result(f"模型没有返回内容。这局的设定：\n\n{设定文本(设定)}")
             return
         yield event.plain_result(结果)
 
