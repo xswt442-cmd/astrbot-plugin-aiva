@@ -228,6 +228,67 @@ class TestMain已接上:
             < 片段.index("找同名的人")
         )
 
+    def test_main里的名字都存在(self):
+        """**别再犯 `_从原始载荷认对手` 这种错。**
+
+        线上炸过：`name '_从原始载荷认对手' is not defined`——函数加了
+        下划线前缀，调用点没跟着改。本地 243 个测试全绿，因为它们测的是
+        `aiva/pk.py` 里那个函数**本身**，没有一个真的去解析并检查
+        `main.py` 的调用。
+
+        所以这里用 AST 把 main.py 的顶层定义 + 导入全部收集起来，
+        再把函数体里调用的每个名字逐个查一遍。
+        """
+        源码 = (仓库根 / "main.py").read_text(encoding="utf-8")
+        树 = ast.parse(源码)
+
+        可见: set[str] = set(dir(__builtins__)) | set(dir(json))
+        for 节点 in ast.walk(树):
+            if isinstance(节点, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                可见.add(节点.name)
+            elif isinstance(节点, ast.Import):
+                for 别名 in 节点.names:
+                    可见.add(别名.asname or 别名.name.split(".")[0])
+            elif isinstance(节点, ast.ImportFrom):
+                for 别名 in 节点.names:
+                    可见.add(别名.asname or 别名.name)
+            elif isinstance(节点, ast.Name) and isinstance(节点.ctx, ast.Store):
+                可见.add(节点.id)
+            elif isinstance(节点, ast.arg):
+                可见.add(节点.arg)
+            elif isinstance(节点, ast.ExceptHandler) and 节点.name:
+                可见.add(节点.name)
+            elif isinstance(节点, (ast.comprehension,)):
+                for 子 in ast.walk(节点.target):
+                    if isinstance(子, ast.Name):
+                        可见.add(子.id)
+
+        # 局部变量：每个函数体里的赋值/参数/for 都算
+        缺 = []
+        for 函数 in ast.walk(树):
+            if not isinstance(函数, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for 节点 in ast.walk(函数):
+                if isinstance(节点, ast.Name) and isinstance(节点.ctx, ast.Store):
+                    可见.add(节点.id)
+        for 节点 in ast.walk(树):
+            if isinstance(节点, ast.Call):
+                函 = 节点.func
+                名 = (
+                    函.id
+                    if isinstance(函, ast.Name)
+                    else 函.attr
+                    if isinstance(函, ast.Attribute)
+                    else None
+                )
+                if 名 and 名.startswith("_") and 名 not in 可见:
+                    缺.append((节点.lineno, 名))
+
+        assert not 缺, (
+            "main.py 里调用了不存在的名字（多半是加/减了下划线前缀"
+            "但没同步）：" + ", ".join(f"第{行}行 {名}" for 行, 名 in 缺)
+        )
+
     def test_绑定时记昵称(self):
         源码 = (仓库根 / "main.py").read_text(encoding="utf-8")
         assert "记昵称(" in 源码, "绑定时必须记昵称，否则 PK 无从按名字找人"
