@@ -138,3 +138,11 @@ class TestPK提示:
 
     def test_互损要有字数下限(self):
         assert "至少 90 字" in self._提示()
+
+    def test_互损主要攻击输的一方(self):
+        """两边都重点攻击等于没有倾向，反而像端水。"""
+        提示 = self._提示()
+
+        assert "主要攻击输的一方最难看的那一项" in 提示
+        assert "赢的一方顺带攻击一下" in 提示
+        assert "不要两边都重点攻击" in 提示
