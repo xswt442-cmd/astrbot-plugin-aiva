@@ -53,6 +53,12 @@ _组别名 = {f"/{_组名}"}
 _轮询节奏 = 2.0
 _轮询预算 = 55.0
 
+# 调模型的最长等待。`tool_loop_agent` 没有内置超时，上游挂起时它就一直等，
+# 用户看到的是「机器人死了」，我们连卡在哪一步都不知道。
+# 实测正常一次 20~30 秒（max_steps=8，可能多轮工具调用），90 秒留足余量：
+# 超了就是上游真有问题，早点失败比让人干等强。
+_模型超时 = 90.0
+
 _帮助文本 = """爱瓦 · 无畏契约国服战绩查询
 
 数据来自掌上无畏契约 App，需要扫码登录一次。
@@ -502,16 +508,45 @@ class Main(Star):
         return 近况文本(摘要), 摘要
 
     async def _问模型(self, event: AstrMessageEvent, 提示: str) -> str:
-        """用当前会话的模型问一句话，返回它写的内容。"""
+        """用当前会话的模型问一句话，返回它写的内容。
+
+        **必须设超时。** `tool_loop_agent` 底层是 HTTP 请求，上游（cliproxyapi /
+        各种 API）挂起时不会自己回来。实测锐评指令已经挂过2 分 43 秒、
+        日志里一行都没有——用户只看到「机器人不理人了」，我们却连它卡在哪
+        一步都不知道。超时会把它变成一条明确失败，而不是永久静默。
+        """
         try:
             提供方 = await self.context.get_current_chat_provider_id(event.unified_msg_origin)
         except Exception as exc:
             raise RuntimeError(f"取不到当前对话用的模型：{exc}") from exc
 
-        结果 = await self.context.tool_loop_agent(
-            event=event,
-            chat_provider_id=提供方,
-            prompt=提示,
-            max_steps=8,
+        logger.info(
+            f"[aiva] 调模型 provider={提供方!r} 提示{len(提示)}字，"
+            f"最多等 {_模型超时}秒"
         )
-        return (getattr(结果, "completion_text", "") or "").strip()
+        起点 = time.monotonic()
+        try:
+            结果 = await asyncio.wait_for(
+                self.context.tool_loop_agent(
+                    event=event,
+                    chat_provider_id=提供方,
+                    prompt=提示,
+                    max_steps=8,
+                ),
+                timeout=_模型超时,
+            )
+        except asyncio.TimeoutError:
+            用时 = time.monotonic() - 起点
+            logger.warning(
+                f"[aiva] 调模型超过 {_模型超时}秒（实际{用时:.0f}秒）放弃，"
+                f"provider={提供方!r}"
+            )
+            raise RuntimeError(
+                f"模型 {_模型超时}秒没回话（provider={提供方}）。"
+                "上游可能挂了，稍后再试。"
+            ) from None
+
+        用时 = time.monotonic() - 起点
+        文本 = (getattr(结果, "completion_text", "") or "").strip()
+        logger.info(f"[aiva] 模型用时{用时:.1f}秒，返回 {len(文本)} 字")
+        return 文本
