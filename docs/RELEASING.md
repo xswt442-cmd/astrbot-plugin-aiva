@@ -58,12 +58,22 @@ AstrBot 插件市场从仓库的 `metadata.yaml` 读插件信息，版本号也�
 
 ## 图标
 
-**本仓库还没有图标。** `logo.png` 尚未生成，`releasing` 里的图标流程照
-`astrbot_plugin_aiwm` 走：文件名与位置都是 AstrBot 硬编码的（`star_manager.py`
-里的 `logo_fname`），放在仓库根目录，规格 256×256、RGB 无 alpha。
+`logo.png` 在仓库根目录，文件名与位置都是 AstrBot 硬编码的（`star_manager.py`
+里的 `logo_fname`），不要另建目录。WebUI 通过一个 300 秒有效的文件 token 拉图，
+所以体积要小——超过几百 KB 每次刷新都会重传。
 
-做图标时同时补回 `test/test_metadata.py` 里的三条图标检查
-（在 aiwm 那边跟着 `icon/` 源图一起，搬过来时因为还没有图标先摘掉了）。
+规格是 256×256、RGB 无 alpha。
+
+**改图标改 `icon/aiva-icon.png`，然后跑 `python test/做图标.py` 重新生成。**
+与 aiwm 那份不同，这张源图**不做亮度抠底**——采样过，图案暗部与背景亮度
+重叠，按亮度抠会把人抠没；徽章外圈直径约占画布 87%，圆形裁切切不到图案，
+直接整张 LANCZOS 缩放即可。脚本里带一个自检，图案贴边时会拒绝生成。
+
+`test/做图标.py` 需要 Pillow，它不在 `requirements.txt` 里——那是给 AstrBot
+装的运行时清单，而做图标是手工操作。
+
+源图 1.7 MB，是改图标时用的，装插件用不上。`.gitattributes` 里的
+`icon/ export-ignore` 让它不进 `git archive` 出的发布包，仓库里照常留着。
 
 要看发布包会带哪些文件：
 
