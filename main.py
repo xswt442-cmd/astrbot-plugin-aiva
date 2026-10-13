@@ -27,7 +27,7 @@ from astrbot.core.star.filter.custom_filter import CustomFilter
 # 阶段报错，而不是等用户发了指令才在懒加载里抛模块不存在。
 from .aiva.auth.ptlogin import 扫码会话
 from .aiva.match import 开局设定, 设定文本
-from .aiva.pk import 找对手
+from .aiva.pk import 找对手, 从提及里找对手
 from .aiva.prompts import PK提示, 开局提示, 锐评提示
 from .aiva.stats import 占优项数, 对比文本, 对比要点, 聚合, 近况文本
 from .aiva.storage import (
@@ -471,12 +471,23 @@ class Main(Star):
             yield event.plain_result("你自己还没绑定。发 /爱瓦 绑定 扫码登录。")
             return
 
-        对手标识 = 找对手(
-            getattr(event, "message_obj", None) and event.message_obj.message or [],
-            getattr(event, "message_str", "") or "",
+        消息 = getattr(event, "message_obj", None)
+        机器人 = str(getattr(event, "self_id", "") or "")
+
+        # QQ 官方平台上组件链和正文都拿不到 @别人 的 ID（适配器只转
+        # `is_you` 的），必须回头读 `raw_message.mentions`。详见 aiva/pk.py。
+        对手标识 = 从提及里找对手(
+            getattr(消息, "raw_message", None),
             自己=自己,
-            机器人=str(getattr(event, "self_id", "") or ""),
+            机器人=机器人,
         )
+        if not 对手标识:
+            对手标识 = 找对手(
+                getattr(消息, "message", None) or [],
+                getattr(event, "message_str", "") or "",
+                自己=自己,
+                机器人=机器人,
+            )
         if not 对手标识:
             yield event.plain_result(
                 "没认出要和谁比。发「/爱瓦 PK @群友」，@ 到那个人才行——\n"
