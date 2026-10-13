@@ -31,7 +31,7 @@ from .aiva.prompts import PK提示, 开局提示, 锐评提示
 from .aiva.stats import 占优项数, 对比文本, 对比要点, 聚合, 近况文本
 from .aiva.storage import 凭据仓库, 凭据摘要, 凭据是否齐全
 from .aiva.transport import 业务错误, 掌瓦传输, 登录过期
-from .aiva.兜底 import 取落空参数, 是否落空, 落空提示
+from .aiva.兜底 import 以组名开头, 取落空参数, 是否落空, 落空提示
 
 _组名 = "爱瓦"
 
@@ -102,6 +102,11 @@ class _落空兜底(CustomFilter):
 
     def filter(self, event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
         文本 = getattr(event, "message_str", "") or ""
+        # 这条过滤器对**每一条消息**都会跑（CommandGroupFilter 先跑
+        # custom_filter_ok 再检查组名），所以第一件事是判断关不关我事。
+        if not 以组名开头(文本, _组名):
+            return True
+        logger.info(f"[aiva] 指令命中 message_str={文本!r}")
         if 是否落空(文本, _组名):
             event.set_result(
                 MessageEventResult().message(落空提示(取落空参数(文本, _组名)))
