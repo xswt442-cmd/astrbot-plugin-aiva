@@ -120,10 +120,17 @@ class Test跳转超时预算:
         assert "_跳转超时" in 源码
         assert "timeout=aiohttp.ClientTimeout(total=_跳转超时)" in 源码
 
-    def test_跳转超时明显小于会话超时(self):
+    def test_单跳超时不再靠跳数兜底(self):
+        """这条断言原本要求「单跳≤10秒」，防的是超时叠乘。
+
+        现在改用显式墙钟预算 + CDN 兜底页短路，单跳超时不再是无界的乘数：
+        能走的跳有上限，走不通的会在第一跳就短路。所以约束换了方向——
+        单跳要够长（腾讯登录接口实测约 3 秒），但必须有短路兜底。
+        """
         from aiva.auth.ptlogin import _跳转超时
 
-        assert _跳转超时 <= 10, f"单跳 {_跳转超时} 秒太长，5 跳就过 50 秒了"
+        assert _跳转超时 >= 8, f"单跳 {_跳转超时} 秒太短，腾讯登录接口约需 3 秒"
+        assert "_兜底落点" in 源码, "必须有 CDN 兜底页短路，否则无效请求会白烧预算"
 
     def test_捕获列表含超时(self):
         assert (
