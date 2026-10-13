@@ -1,8 +1,39 @@
-# 这些不进 `git archive` 出的包：开发时用的文件，装插件时用不上。
-# 发布流程见 docs/RELEASING.md。
+# 行尾
+#
+# 仓库内统一存 LF，检出也是 LF。Windows 上编辑出的 CRLF 会让 Linux runner
+# 上的 shell 脚本与工作流 `run:` 块报错，而这类文件在本地看起来完全正常。
+* text=auto eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
 
-icon/ export-ignore
-.github/ export-ignore
-docs/ export-ignore
-test/ export-ignore
-uv.lock export-ignore
+# 二进制：不做行尾转换，不参与diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.zip binary
+
+# 文档用 markdown diff 驱动
+*.md text diff=markdown
+
+# 生成物：不计入语言统计，仍正常 diff
+uv.lock linguist-generated=true
+
+# 发布时排除
+#
+# 插件市场从 main 拉 zip（见 docs/RELEASING.md），用户装的是这个包。
+#
+# 排除的是只有开发时才用得上的东西：图标源图、测试、CI 配置、uv.lock。
+# 留着它们只会占体积，还让人以为插件依赖 pytest。
+#
+# `docs/` 不能排除：README 引用了那里的术语表与更新日志，排除后文档指向空路径。
+icon/     export-ignore
+test/     export-ignore
+.github/  export-ignore
+uv.lock   export-ignore
