@@ -23,6 +23,7 @@ from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event.filter import command_group, custom_filter
 from astrbot.api.star import Context, Star
 from astrbot.core.platform.astr_message_event import MessageEventResult
+from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.star.filter.custom_filter import CustomFilter
 
 # 全部在模块顶层导入。插件加载时就把整个包摸清：少文件、依赖缺失都在启动
@@ -112,8 +113,13 @@ _帮助文本 = """爱瓦 · 无畏契约国服战绩查询
   （直接写昵称，别 @ ——QQ 官方机器人收不到 @别人，
   写了也认不出来。）
 
+/爱瓦 昵称 [名字]
+  改 PK 时被叫的名字。不带参数看当前是什么。
+  默认取绑定时的平台显示名，想换随时改，不用重新绑定。
+
 /爱瓦 解绑
   解除绑定并立即删除本地凭据。
+  登录态过期不用解绑——直接发 /爱瓦 绑定 重扫即可。
 
 /爱瓦 状态
   看当前绑定是否正常。
@@ -345,8 +351,14 @@ class Main(Star):
                 记昵称(记绑定时间(凭据), self._名字(event)),
             )
             logger.info(f"[aiva] 用户 {用户} 绑定成功")
+            名字 = str(凭据.get("昵称") or "").strip()
             yield event.plain_result(
-                f"✅ 绑定成功（{凭据摘要(凭据)}）。\n\n现在可以发 /爱瓦 战绩。"
+                f"✅ 绑定成功（{凭据摘要(凭据)}）。\n\n现在可以发 /爱瓦 战绩。\n"
+                + (
+                    f"PK 时别人用「/爱瓦 PK {名字}」点你；想换个名字发 /爱瓦 昵称 新名字。"
+                    if 名字
+                    else "想让别人 PK 时点得到你，发 /爱瓦 昵称 你的名字。"
+                )
             )
         finally:
             await 会话.关闭()
@@ -360,6 +372,53 @@ class Main(Star):
             return
         logger.info(f"[aiva] 用户 {用户} 解绑")
         yield event.plain_result("已解绑，本地凭据已删除。")
+
+    @爱瓦.command("昵称")
+    async def 昵称(self, event: AstrMessageEvent, 名字: GreedyStr):
+        """改 PK 时被叫的名字。不带参数时看当前是什么。
+
+        QQ 官方机器人收不到 @别人（实测 `raw_message.mentions` 是空数组），
+        所以 PK 只能按名字认人。名字默认取绑定时的平台显示名，而**改名字不该
+        逼人重扫一次码**——重绑要走完整套扫码流程，比改个名字重得多。
+        """
+        用户 = event.get_sender_id()
+        凭据 = self._凭据.读取(用户)
+        if not 凭据 or not 凭据是否齐全(凭据):
+            yield event.plain_result("还没绑定。发 /爱瓦 绑定 扫码登录。")
+            return
+
+        新名 = str(名字 or "").strip()
+        if not 新名:
+            当前 = str(凭据.get("昵称") or "").strip()
+            yield event.plain_result(
+                f"当前 PK 名字：{当前 or '（还没设）'}\n"
+                "群里发 "
+                + (
+                    f"「/爱瓦 PK {当前}」就能点到你。"
+                    if 当前
+                    else "「/爱瓦 昵称 你的名字」设一个。"
+                )
+            )
+            return
+
+        # 名字要念进 PK 的提示词里，太长会把版面挤掉，也让人在 PK 时敲不完。
+        if len(新名) > _昵称上限:
+            yield event.plain_result(f"名字太长了，最多 {_昵称上限} 个字。")
+            return
+
+        # 重名别人第一反应是「我是不是被占了」，所以顺手告诉他有几个人同名。
+        撞名 = [名 for _, 名 in 找同名的人(self._凭据, 新名, 自己=用户)]
+
+        self._凭据.写入(用户, 记昵称(凭据, 新名))
+        logger.info(f"[aiva] 用户 {用户} 昵称改为 {新名!r}")
+        if 撞名:
+            yield event.plain_result(
+                f"PK 名字改成「{新名}」。\n"
+                f"⚠️ 已经有 {len(撞名)} 个人叫这个名字（{'、'.join(撞名)}），"
+                "群里 PK 时可能会点错人。换一个更特别的？"
+            )
+            return
+        yield event.plain_result(f"PK 名字改成「{新名}」。\n群里发「/爱瓦 PK {新名}」就能点到你。")
 
     @爱瓦.command("状态")
     async def 状态(self, event: AstrMessageEvent):

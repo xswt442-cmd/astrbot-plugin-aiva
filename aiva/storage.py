@@ -83,23 +83,33 @@ _昵称上限 = 32
 def 找同名的人(仓库: 凭据仓库, 关键词: str, *, 自己: str = "") -> list[tuple[str, str]]:
     """在所有已绑定的人里找昵称匹配 `关键词` 的，返回 `[(用户标识, 昵称)]`。
 
-    匹配规则：忽略大小写 + 去空格 + 子串包含。`znne` 能匹配到 `ZnNe`，
-    `YJJ` 能匹配到 `yjj`。返回全部候选而不只第一个——重名时让用户自己选，
-    挑错人等于拿错人的战绩。
+    **精确优先，模糊兜底**：先把完全相等的挑出来，没有再用子串包含。
+    只做子串的话，群里同时有「小明」和「小明同学」，发 `/爱瓦 PK 小明`
+    会一次返回两个候选让人选——明明有个一模一样的。爱完美（aiwm）就是
+    这么做的，这里照抄。
+
+    比较时忽略大小写并去空格：`znne` 能匹配 `ZnNe`，`老 狗` 也能被 `老狗`
+    找到。
+
+    精确命中多于一个（真重名）时把两个都返回，让用户自己选——挑错人等于
+    拿错人的战绩，宁可多问一句。
     """
     词 = "".join(str(关键词 or "").split()).lower()
     if not 词:
         return []
-    命中 = []
+
+    候选: list[tuple[str, str]] = []
     for 用户, 凭据 in 仓库.全部():
         if 自己 and 用户 == 自己:
             continue  # 自己跟自己比没意义
         名 = str(凭据.get("昵称") or "")
-        if not 名:
-            continue
-        if 词 in "".join(名.split()).lower():
-            命中.append((用户, 名))
-    return 命中
+        if 名:
+            候选.append((用户, 名))
+
+    精确 = [(u, n) for u, n in 候选 if "".join(n.split()).lower() == 词]
+    if 精确:
+        return 精确
+    return [(u, n) for u, n in 候选 if 词 in "".join(n.split()).lower()]
 
 
 def 已绑多久(凭据: dict[str, Any]) -> int | None:
