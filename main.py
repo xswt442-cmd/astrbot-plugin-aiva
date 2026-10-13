@@ -635,8 +635,17 @@ class Main(Star):
 
         yield event.plain_result(结果 or "模型没有返回内容。")
 
-    async def _名字(self, event: AstrMessageEvent) -> str:
-        """发起指令那个人的平台显示名。太长的裁掉，PK 里要念出来。"""
+    def _名字(self, event: AstrMessageEvent) -> str:
+        """发起指令那个人的平台显示名。太长的裁掉，PK 里要念出来。
+
+        **故意不是 async**：函数体里没有任何 await，做成协程只会引来
+        一类事故——调用点漏写 `await` 时不报错，而是拿到一个协程对象，
+        它是真值（`or "你"` 救不了），还会被 f-string 友好地渲染成
+        `<coroutine object Main.名字 at 0x7fa...>`，一路喂进提示词。
+        线上真出过：模型把这段字符串当成玩家名字，一本正经点评了半天
+        「`<coroutine object>`的9.4场均死亡就是铁证」。
+        同步函数漏写 await 的地方根本调不出结果，TypeError 当场就炸。
+        """
         try:
             名字 = str(event.get_sender_name() or "").strip()
         except Exception:
