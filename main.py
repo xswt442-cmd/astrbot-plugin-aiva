@@ -87,45 +87,20 @@ _模型系统提示 = (
 )
 
 _帮助文本 = """爱瓦 · 无畏契约国服战绩查询
-
 数据来自掌上无畏契约 App，需要扫码登录一次。
 
-/爱瓦 绑定
-  发起 QQ 扫码登录。扫的是绑定的那个人自己的账号，只有你能查你自己。
-  登录态一般撑不到一天，过期后直接重扫即可，不用先解绑。
+/爱瓦 绑定 ｜ QQ 扫码登录，只有你能查你自己
+/爱瓦 战绩 ｜ 近期战绩
+/爱瓦 锐评 ｜ 让模型基于战绩写一段锐评
+/爱瓦 开一局 ｜ 推演一局竞技模式（不是真实战绩）
+/爱瓦 PK <群友昵称> ｜ 和另一个已绑定的人比
+/爱瓦 昵称 <名字> ｜ 改 PK 时被叫的名字，不用重新绑定
+/爱瓦 状态 ｜ 看绑定是否正常
+/爱瓦 解绑 ｜ 删除本地凭据
+/爱瓦 帮助 ｜ 就是这条
 
-/爱瓦 战绩
-  近期战绩：胜负与胜率、场均 K/D/A、KDA、ACS、回合净胜、
-  最近走势、地图分布、常用特工。
-
-/爱瓦 锐评
-  让模型基于上面的数据写一段锐评。会先给一句称号，再分别说打得好、
-  问题和一条具体建议。
-
-/爱瓦 开一局
-  随机生成一局竞技模式，让模型推演过程与结果。数字是编的，会写明这一点。
-  绑定过的话推演贴近你的实际水平，没绑定按中等水平来。
-
-/爱瓦 PK 群友昵称
-  和另一个已绑定的人比近期战绩。对方也得自己绑过。
-  模型会给两人各打一个趣味分并点评胜负手。
-  （直接写昵称，别 @ ——QQ 官方机器人收不到 @别人，
-  写了也认不出来。）
-
-/爱瓦 昵称 [名字]
-  改 PK 时被叫的名字。不带参数看当前是什么。
-  默认取绑定时的平台显示名，想换随时改，不用重新绑定。
-
-/爱瓦 解绑
-  解除绑定并立即删除本地凭据。
-  登录态过期不用解绑——直接发 /爱瓦 绑定 重扫即可。
-
-/爱瓦 状态
-  看当前绑定是否正常。
-
-/爱瓦 帮助
-  就是这条。
-
+PK 要写对方的昵称，@ 别人在 QQ 官方平台拿不到标识，写了也认不出来。
+登录态一般撑不到一天，过期后直接发 /爱瓦 绑定 重扫，不用先解绑。
 直接问模型「我的无畏契约战绩怎么样」也会走同一套数据。"""
 
 _昵称上限 = 16
@@ -230,12 +205,12 @@ class Main(Star):
             还活着 = await self._绑定还活着(已有)
             if 还活着:
                 yield event.plain_result(
-                    f"你已经绑定了账号（{凭据摘要(已有)}），登录态正常。\n要换号先用 /爱瓦 解绑。"
+                    f"已经绑定了账号（{凭据摘要(已有)}），登录态正常。要换号先发 /爱瓦 解绑。"
                 )
                 return
             logger.info(f"[aiva] 用户 {用户} 已有绑定但已失效，允许直接覆盖重绑")
             yield event.plain_result(
-                f"之前的绑定已经失效了（{凭据摘要(已有)}）。\n直接重新扫码就行，不用解绑。"
+                f"之前的绑定失效了（{凭据摘要(已有)}），直接重新扫码就行，不用解绑。"
             )
 
         会话 = 扫码会话()
@@ -263,7 +238,7 @@ class Main(Star):
             yield event.chain_result(
                 [
                     Image.fromBytes(二维码),
-                    Plain("请用手机 QQ 扫码，50 秒内有效。"),
+                    Plain("用手机 QQ 扫码，50 秒内有效。"),
                 ]
             )
 
@@ -276,10 +251,7 @@ class Main(Star):
                 现在 = time.monotonic()
                 if 现在 >= 截止:
                     logger.info(f"[aiva] 扫码轮询耗尽预算，共问{问了几轮} 轮")
-                    yield event.plain_result(
-                        "扫码超时了。二维码只有一分钟有效期，扫完记得点确认。\n"
-                        "重新发 /爱瓦 绑定 再试一次。"
-                    )
+                    yield event.plain_result("扫码超时了，重新发 /爱瓦 绑定 再试。")
                     return
 
                 # 补足到下一个节奏点。网络慢就从预算里扣，不会像原来那样
@@ -305,15 +277,13 @@ class Main(Star):
                     # 前者是我们问得太慢，后者是我们自己的解析 bug。
                     if "过期" in str(exc):
                         yield event.plain_result(
-                            f"扫码失败：{exc}。\n"
-                            "这张码已经在你扫之前就过期了（服务器问腾讯比较慢），"
-                            "重新发 /爱瓦 绑定 再试一次。"
+                            f"扫码失败：{exc}。码在你扫之前就过期了"
+                            "（服务器问腾讯比较慢），重新发 /爱瓦 绑定 再试。"
                         )
                     else:
                         yield event.plain_result(
                             f"扫码失败：{exc}。\n"
-                            "**这不是你的问题**——腾讯已经确认你扫了，是我们没从跳转里"
-                            "取到凭据。日志里有轨迹，正在修。"
+                            "腾讯已经确认你扫了，是我们没从跳转里取到凭据——不是你的问题。"
                         )
                     return
                 except asyncio.TimeoutError:
@@ -354,11 +324,11 @@ class Main(Star):
             logger.info(f"[aiva] 用户 {用户} 绑定成功")
             名字 = str(凭据.get("昵称") or "").strip()
             yield event.plain_result(
-                f"绑定成功（{凭据摘要(凭据)}）。\n\n现在可以发 /爱瓦 战绩。\n"
+                f"绑定成功（{凭据摘要(凭据)}）。\n"
                 + (
-                    f"PK 时别人用「/爱瓦 PK {名字}」点你；想换个名字发 /爱瓦 昵称 新名字。"
+                    f"PK 名字是「{名字}」，要改发 /爱瓦 昵称 <名字>。"
                     if 名字
-                    else "想让别人 PK 时点得到你，发 /爱瓦 昵称 你的名字。"
+                    else "想让别人 PK 时点得到你，发 /爱瓦 昵称 <名字>。"
                 )
             )
         finally:
@@ -385,20 +355,14 @@ class Main(Star):
         用户 = event.get_sender_id()
         凭据 = self._凭据.读取(用户)
         if not 凭据 or not 凭据是否齐全(凭据):
-            yield event.plain_result("还没绑定。发 /爱瓦 绑定 扫码登录。")
+            yield event.plain_result("还没绑定，先发 /爱瓦 绑定 扫码登录。")
             return
 
         新名 = str(名字 or "").strip()
         if not 新名:
             当前 = str(凭据.get("昵称") or "").strip()
             yield event.plain_result(
-                f"当前 PK 名字：{当前 or '（还没设）'}\n"
-                "群里发 "
-                + (
-                    f"「/爱瓦 PK {当前}」就能点到你。"
-                    if 当前
-                    else "「/爱瓦 昵称 你的名字」设一个。"
-                )
+                f"当前 PK 名字：「{当前 or '（还没设）'}」。发 /爱瓦 昵称 <名字> 改。"
             )
             return
 
@@ -414,12 +378,11 @@ class Main(Star):
         logger.info(f"[aiva] 用户 {用户} 昵称改为 {新名!r}")
         if 撞名:
             yield event.plain_result(
-                f"PK 名字改成「{新名}」。\n"
-                f"已经有 {len(撞名)} 个人叫这个名字（{'、'.join(撞名)}），"
-                "群里 PK 时可能会点错人。换一个更特别的？"
+                f"PK 名字改成「{新名}」，已经有 {len(撞名)} 个人叫这个名字"
+                f"（{'、'.join(撞名)}），群里 PK 可能会点错人。"
             )
             return
-        yield event.plain_result(f"PK 名字改成「{新名}」。\n群里发「/爱瓦 PK {新名}」就能点到你。")
+        yield event.plain_result(f"PK 名字改成「{新名}」，群友发 /爱瓦 PK {新名} 就能点你。")
 
     @爱瓦.command("状态")
     async def 状态(self, event: AstrMessageEvent):
@@ -427,11 +390,11 @@ class Main(Star):
         用户 = event.get_sender_id()
         凭据 = self._凭据.读取(用户)
         if not 凭据:
-            yield event.plain_result("还没绑定。发 /爱瓦 绑定 扫码登录。")
+            yield event.plain_result("还没绑定，先发 /爱瓦 绑定 扫码登录。")
             return
         if not 凭据是否齐全(凭据):
             yield event.plain_result(
-                f"本地记录不完整（{凭据摘要(凭据)}）。\n直接发 /爱瓦 绑定 重新扫码就行。"
+                f"本地记录不完整（{凭据摘要(凭据)}），直接发 /爱瓦 绑定 重新扫码就行。"
             )
             return
 
@@ -440,7 +403,7 @@ class Main(Star):
             角色 = await 传输.取主角色(凭据)
         except 登录过期:
             yield event.plain_result(
-                f"已绑定（{凭据摘要(凭据)}），但登录态已失效。\n"
+                f"已绑定（{凭据摘要(凭据)}），但登录态失效了。"
                 "直接发 /爱瓦 绑定 重新扫码就行，不用先解绑。"
             )
             return
@@ -470,30 +433,22 @@ class Main(Star):
         if not 战绩可用:
             logger.warning(f"[aiva] 用户 {用户} 状态自查失败：{战绩原因}")
             yield event.plain_result(
-                f"账号信息还在（{凭据摘要(凭据)}），但战绩已经取不到了：\n"
-                f"{战绩原因}\n\n"
-                "这说明登录态过期了。\n"
-                "直接发 /爱瓦 绑定 重新扫码就行，不用先解绑。"
+                f"账号信息还在（{凭据摘要(凭据)}），但战绩取不到了：{战绩原因}\n"
+                "登录态过期了，直接发 /爱瓦 绑定 重新扫码就行，不用先解绑。"
             )
             return
 
         名字 = str(角色.get("nickname") or 角色.get("name") or "").strip()
-        行 = "绑定正常"
+        行 = f"绑定正常（{凭据摘要(凭据)}）"
         if 名字:
-            行 += f"：{名字}（{凭据摘要(凭据)}）"
-        else:
-            行 += f"（{凭据摘要(凭据)}）"
+            行 = f"绑定正常：{名字}（{凭据摘要(凭据)}）"
 
         多久 = 已绑多久(凭据)
         if 多久 is not None:
             小时 = 多久 / 3600
             行 += f"\n已绑定 {小时:.1f} 小时"
             if 该提醒重绑(凭据):
-                行 += (
-                    "\n腾讯的登录态通常撑不满一天。"
-                    "如果等下战绩或锐评报「登录态失效」，"
-                    "直接发 /爱瓦 绑定 重新扫码即可，不用先解绑。"
-                )
+                行 += "\n腾讯的登录态通常撑不满一天，报「登录态失效」时直接重扫即可。"
         else:
             行 += "\n（这份绑定是旧版本存的，没有时间戳）"
 
@@ -578,7 +533,7 @@ class Main(Star):
         自己 = event.get_sender_id()
         甲凭据 = self._凭据.读取(自己)
         if not 甲凭据 or not 凭据是否齐全(甲凭据):
-            yield event.plain_result("你自己还没绑定。发 /爱瓦 绑定 扫码登录。")
+            yield event.plain_result("还没绑定，先发 /爱瓦 绑定 扫码登录。")
             return
 
         消息 = getattr(event, "message_obj", None)
@@ -610,13 +565,13 @@ class Main(Star):
                 yield event.plain_result(
                     f"有 {len(候选)} 个人叫「{关键词}」，分不清是哪个：\n"
                     + "\n".join(f"· {名}" for _, 名 in 候选)
-                    + "\n让他发 /爱瓦 昵称 换个更特别的，或者你把名字写完整一点。"
+                    + "\n让对方发 /爱瓦 昵称 换个更特别的名字，或者把名字写完整一点。"
                 )
                 return
             elif 关键词:
                 yield event.plain_result(
-                    f"没找到叫「{关键词}」的人。他得先自己发 /爱瓦 绑定，"
-                    "再发 /爱瓦 昵称 设一个名字。"
+                    f"没找到叫「{关键词}」的人：他得先发 /爱瓦 绑定，"
+                    "再发 /爱瓦 昵称 <名字> 设一个。"
                 )
                 return
 
@@ -628,11 +583,9 @@ class Main(Star):
         )
         if not 对手标识:
             yield event.plain_result(
-                "没认出要和谁比。发「/爱瓦 PK <名字>」最稳——对方发过 "
-                "/爱瓦 昵称 <名字> 就能被点到。\n"
-                "QQ 官方机器人收不到 @别人，被 @ 的人的标识平台根本没传下来，"
-                "这条路走不通。\n"
-                "对方得自己发过 /爱瓦 绑定，插件不会替你去查别人。"
+                "没认出要和谁比。发 /爱瓦 PK <名字> 最稳。\n"
+                "@ 别人这条路走不通——QQ 官方没把被 @ 的人的标识传给机器人；"
+                "对方得先发过 /爱瓦 绑定 并设过名字。"
             )
             return
 
@@ -652,7 +605,7 @@ class Main(Star):
             甲列表, 甲角色 = await 取对局(甲凭据)
         except 登录过期:
             yield event.plain_result(
-                f"**{甲名}** 的登录态失效了。发 /爱瓦 绑定 重新扫码就行，不用先解绑。"
+                f"{甲名}的登录态失效了，发 /爱瓦 绑定 重新扫码就行，不用先解绑。"
             )
             return
         except 业务错误 as exc:
@@ -660,14 +613,14 @@ class Main(Star):
             return
         except Exception as exc:
             logger.warning(f"[aiva] PK 取自己战绩失败：{type(exc).__name__}: {exc}")
-            yield event.plain_result(f"取你的战绩失败：{exc}")
+            yield event.plain_result(f"读取你的战绩失败：{exc}")
             return
 
         try:
             乙列表, 乙角色 = await 取对局(乙凭据)
         except 登录过期:
             yield event.plain_result(
-                f"**{乙名}** 的登录态失效了。让他发 /爱瓦 绑定 重新扫码，不用先解绑。"
+                f"{乙名}的登录态失效了，让他发 /爱瓦 绑定 重新扫码，不用先解绑。"
             )
             return
         except 业务错误 as exc:
@@ -675,7 +628,7 @@ class Main(Star):
             return
         except Exception as exc:
             logger.warning(f"[aiva] PK 取对手战绩失败：{type(exc).__name__}: {exc}")
-            yield event.plain_result(f"取对方的战绩失败：{exc}")
+            yield event.plain_result(f"读取对方的战绩失败：{exc}")
             return
 
         甲摘要 = 聚合(甲列表)
@@ -765,7 +718,7 @@ class Main(Star):
         """
         凭据 = self._凭据.读取(用户)
         if not 凭据 or not 凭据是否齐全(凭据):
-            raise 这句给用户("还没绑定。发 /爱瓦 绑定 扫码登录。")
+            raise 这句给用户("还没绑定，先发 /爱瓦 绑定 扫码登录。")
 
         try:
             原始列表, 角色 = await 取对局(凭据)
@@ -773,7 +726,7 @@ class Main(Star):
             # 文案必须说清「怎么修」：光说「请重新绑定」不够——绑定指令
             # 以前会回「你已经绑定了，要换号先解绑」，用户被两面挡。
             # 现在绑定指令已允许覆盖重扫，这里就照实说「直接重扫」。
-            raise 这句给用户("登录态失效了。直接发 /爱瓦 绑定 重新扫码就行，不用先解绑。") from exc
+            raise 这句给用户("登录态失效了，发 /爱瓦 绑定 重新扫码就行，不用先解绑。") from exc
         except 业务错误 as exc:
             raise 这句给用户(f"接口不给数据：{exc}") from exc
         except Exception as exc:
@@ -783,7 +736,7 @@ class Main(Star):
         摘要 = 聚合(原始列表)
         if not 摘要.get("场数"):
             raise 这句给用户(
-                "接口没返回可统计的对局。可能是这个号还没打过竞技/普通模式，"
+                "没有可统计的对局：这个号可能还没打过竞技/普通模式，"
                 "或者最近的对局被隐私设置挡住了。"
             )
         return 近况文本(摘要, 取段位(角色)), 摘要

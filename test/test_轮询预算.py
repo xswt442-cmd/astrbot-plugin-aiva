@@ -99,7 +99,7 @@ class Test区分不出码原因:
         """「码过期」是我们慢，「解析失败」是我们的 bug，文案不能混。
         混了就会让用户反复扫码，而真正要修的是解析。"""
         绑定 = ast.get_source_segment(主源码, _绑定函数()) or ""
-        assert "这不是你的问题" in 绑定
+        assert "不是你的问题" in 绑定
         assert '"过期" in str(exc)' in 绑定, "两种失败必须靠判断分叉，不能共用一句文案"
 
     def test_解析失败时把跳转轨迹打进日志(self):

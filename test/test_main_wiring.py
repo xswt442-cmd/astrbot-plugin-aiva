@@ -125,8 +125,8 @@ class Test兜底同步:
     def test_帮助说明_PK_写昵称而不是艾特群友(self):
         """QQ 官方机器人收不到 @别人，README 曾在这一点上写错。"""
         帮助块 = _帮助块()
-        assert "PK 群友昵称" in 帮助块
-        assert "别 @" in 帮助块
+        assert "PK <群友昵称>" in 帮助块
+        assert "拿不到标识" in 帮助块
 
     def test_帮助首行是产品名加游戏名(self):
         assert _帮助块().lstrip().startswith("爱瓦 · ")
