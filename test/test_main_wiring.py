@@ -29,8 +29,8 @@ def _类() -> ast.ClassDef:
     raise AssertionError("main.py 里没有 Main 类")
 
 
-def _指令名() -> set[str]:
-    """类体里 `@爱瓦.command("x", alias={...})` 声明的全部名字与别名。"""
+def _正式指令名() -> set[str]:
+    """类体里 `@爱瓦.command("x")` 声明的正式指令名，不含别名。"""
     出: set[str] = set()
     for 节点 in _类().body:
         for 装饰 in 节点.decorator_list:
@@ -38,6 +38,16 @@ def _指令名() -> set[str]:
                 continue
             if 装饰.args and isinstance(装饰.args[0], ast.Constant):
                 出.add(str(装饰.args[0].value))
+    return 出
+
+
+def _指令名() -> set[str]:
+    """类体里 `@爱瓦.command("x", alias={...})` 声明的全部名字与别名。"""
+    出 = _正式指令名()
+    for 节点 in _类().body:
+        for 装饰 in 节点.decorator_list:
+            if not isinstance(装饰, ast.Call) or "command" not in ast.unparse(装饰.func):
+                continue
             for 关键字 in 装饰.keywords:
                 if 关键字.arg == "alias" and isinstance(关键字.value, ast.Set):
                     出.update(str(e.value) for e in 关键字.value.elts)
@@ -82,6 +92,12 @@ class Test组名:
         assert "以组名开头" in ast.unparse(方法)
 
 
+def _帮助块() -> str:
+    文本 = main源.read_text(encoding="utf-8")
+    起点 = 文本.index('_帮助文本 = """') + len('_帮助文本 = """')
+    return 文本[起点 : 文本.index('"""', 起点)]
+
+
 def _兜底过滤器() -> ast.FunctionDef:
     for 节点 in _树().body:
         if isinstance(节点, ast.ClassDef) and 节点.name == "_落空兜底":
@@ -98,11 +114,28 @@ class Test兜底同步:
         缺 = _指令名() - 子命令名
         assert not 缺, f"这些指令/别名没写进 兜底.子命令名：{sorted(缺)}"
 
-    def test_提示里提到的指令都真实存在(self):
-        文本 = main源.read_text(encoding="utf-8")
-        帮助块 = 文本.split("_帮助文本")[1].split('"""')[1]
-        for 词 in ("绑定", "战绩", "锐评", "PK", "开一局", "解绑", "状态"):
-            assert f"/爱瓦 {词}" in 帮助块, f"帮助里缺 /爱瓦 {词}"
+    def test_帮助里列了每个指令(self):
+        """帮助漏一条，用户就只能靠猜或问。
+
+        只查正式指令名：别名是给习惯写法兜底的，不必逐条列进帮助。
+        """
+        缺 = sorted(名 for 名 in _正式指令名() if f"/爱瓦 {名}" not in _帮助块())
+        assert not 缺, f"帮助文本里没列这些指令：{缺}"
+
+    def test_帮助说明_PK_写昵称而不是艾特群友(self):
+        """QQ 官方机器人收不到 @别人，README 曾在这一点上写错。"""
+        帮助块 = _帮助块()
+        assert "PK 群友昵称" in 帮助块
+        assert "别 @" in 帮助块
+
+    def test_帮助首行是产品名加游戏名(self):
+        assert _帮助块().lstrip().startswith("爱瓦 · ")
+
+    def test_说明数据来自哪里(self):
+        assert "数据来自" in _帮助块()
+
+    def test_说明自然语言也能用(self):
+        assert "直接问模型" in _帮助块()
 
 
 class Test兜底不越界:
