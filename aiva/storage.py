@@ -16,15 +16,28 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
-__all__ = ["凭据仓库", "凭据是否齐全", "凭据摘要"]
+__all__ = [
+    "凭据仓库",
+    "凭据是否齐全",
+    "凭据摘要",
+    "记绑定时间",
+    "已绑多久",
+    "该提醒重绑",
+]
 
 _文件后缀 = ".json"
 
-# 查战绩必须这四样齐全。缺任何一样都判为「没绑好」，让用户重扫——
-# 而不是带着半份凭据去打接口，拿一个不明就里的错误回来。
+# 腾讯那边 access_token 没有公开的过期字段（登录响应里根本没回 expires_in），
+# 只能靠观测反推：实测凭据能撑过几个小时，但跨天后 1003 概率陡增。
+# 所以按「绑定期」做提醒，而不是等接口报错才告诉用户——那时候用户已经
+# 白等了一轮锐评/战绩。
+_绑定期秒 = 12 * 3600
+
+# 必备字段
 _必备字段 = ("openid", "access_token", "userId", "tid")
 
 
@@ -40,6 +53,26 @@ def 凭据摘要(凭据: dict[str, Any]) -> str:
     if 用户 and len(用户) > 10:
         return f"{用户[:6]}…{用户[-4:]}"
     return 用户 or "（未知）"
+
+
+def 记绑定时间(凭据: dict[str, Any]) -> dict[str, Any]:
+    """在凭据上盖一个绑定时间戳，返回同一个对象（就地改）。"""
+    凭据["绑定于"] = int(time.time())
+    return 凭据
+
+
+def 已绑多久(凭据: dict[str, Any]) -> int | None:
+    """绑了多久（秒）。老数据没这个字段就返回 None。"""
+    时刻 = 凭据.get("绑定于")
+    if not isinstance(时刻, int):
+        return None
+    return max(0, int(time.time()) - 时刻)
+
+
+def 该提醒重绑(凭据: dict[str, Any]) -> bool:
+    """凭据是不是老到该提醒重绑了。"""
+    多久 = 已绑多久(凭据)
+    return 多久 is not None and 多久 > _绑定期秒
 
 
 class 凭据仓库:

@@ -30,7 +30,14 @@ from .aiva.match import 开局设定, 设定文本
 from .aiva.pk import 找对手
 from .aiva.prompts import PK提示, 开局提示, 锐评提示
 from .aiva.stats import 占优项数, 对比文本, 对比要点, 聚合, 近况文本
-from .aiva.storage import 凭据仓库, 凭据摘要, 凭据是否齐全
+from .aiva.storage import (
+    凭据仓库,
+    凭据摘要,
+    凭据是否齐全,
+    已绑多久,
+    该提醒重绑,
+    记绑定时间,
+)
 from .aiva.transport import 业务错误, 挂日志, 取对局, 掌瓦传输, 登录过期
 from .aiva.兜底 import 以组名开头, 取落空参数, 是否落空, 落空提示
 
@@ -58,6 +65,15 @@ _轮询预算 = 55.0
 # 实测正常一次 20~30 秒（max_steps=8，可能多轮工具调用），90 秒留足余量：
 # 超了就是上游真有问题，早点失败比让人干等强。
 _模型超时 = 90.0
+
+# 直连 provider 时给的系统提示。原来的提示全写在 user 消息里（`prompts.py`
+# 生成的 927 字），拆出一层 system 只是为了把「你是谁」和「这次要干什么」
+# 分开——省不了多少字，但模型对 system 段的指令遵循明显更稳。
+_模型系统提示 = (
+    "你在给一个《无畏契约》国服玩家写数据点评。"
+    "你只能使用用户消息里给出的统计数字，不要编造任何没给出的数据、"
+    "段位、地图或特工。严格按用户要求的格式输出，不要加前言、标题或编号。"
+)
 
 _帮助文本 = """爱瓦 · 无畏契约国服战绩查询
 
@@ -284,7 +300,7 @@ class Main(Star):
                 yield event.plain_result("登录成功但拿不到完整凭证（缺 userId 或 tid），请重试。")
                 return
 
-            self._凭据.写入(用户, 凭据)
+            self._凭据.写入(用户, 记绑定时间(凭据))
             logger.info(f"[aiva] 用户 {用户} 绑定成功")
             yield event.plain_result(
                 f"✅ 绑定成功（{凭据摘要(凭据)}）。\n\n现在可以发 /爱瓦 战绩。"
@@ -321,18 +337,63 @@ class Main(Star):
             角色 = await 传输.取主角色(凭据)
         except 登录过期:
             yield event.plain_result(
-                f"已绑定（{凭据摘要(凭据)}），但登录态已失效。请重新 /爱瓦 绑定。"
+                f"⚠️ 已绑定（{凭据摘要(凭据)}），但登录态已失效。"
+                "请 /爱瓦 解绑 后重新绑定。"
             )
             return
         except 业务错误 as exc:
             yield event.plain_result(f"已绑定，但接口现在取不到角色信息：{exc}")
             return
 
+        # **状态必须真的打一次战绩接口**。只查主角色是不够的：
+        # `get_main_role_raw` 只要 Cookie 形状对就回 result=0，而真正需要
+        # 登录态的 `record/list` 早就 1003 了。用户被告知「绑定正常」，
+        # 转头发锐评却被告知「登录态失效」——两个都是真话，只是查的不是
+        # 同一件事。这是用户实际踩到的问题：状态永远绿着，直到用的时候才炸。
+        战绩可用 = True
+        战绩原因 = ""
+        try:
+            await 取对局(凭据, 每页=1)
+        except 登录过期:
+            战绩可用 = False
+            战绩原因 = "登录态已失效"
+        except 业务错误 as exc:
+            战绩可用 = False
+            战绩原因 = f"战绩接口报错：{exc}"
+        except Exception as exc:  # noqa: BLE001
+            战绩可用 = False
+            战绩原因 = f"{type(exc).__name__}: {exc}"
+
+        if not 战绩可用:
+            logger.warning(f"[aiva] 用户 {用户} 状态自查失败：{战绩原因}")
+            yield event.plain_result(
+                f"⚠️ 账号信息还在（{凭据摘要(凭据)}），但**战绩已经取不到了**：\n"
+                f"{战绩原因}\n\n"
+                "这说明登录态过期了。请 /爱瓦 解绑 后重新绑定。"
+            )
+            return
+
         名字 = str(角色.get("nickname") or 角色.get("name") or "").strip()
+        行 = f"✅ 绑定正常"
         if 名字:
-            yield event.plain_result(f"✅ 绑定正常：{名字}（{凭据摘要(凭据)}）")
+            行 += f"：{名字}（{凭据摘要(凭据)}）"
         else:
-            yield event.plain_result(f"✅ 绑定正常（{凭据摘要(凭据)}）")
+            行 += f"（{凭据摘要(凭据)}）"
+
+        多久 = 已绑多久(凭据)
+        if 多久 is not None:
+            小时 = 多久 / 3600
+            行 += f"\n已绑定 {小时:.1f} 小时"
+            if 该提醒重绑(凭据):
+                行 += (
+                    "\n⚠️ 腾讯的登录态通常撑不满一天。"
+                    "如果等下战绩或锐评报「登录态失效」，"
+                    "/爱瓦 解绑 后重新绑定即可。"
+                )
+        else:
+            行 += "\n（这份绑定是旧版本存的，没有时间戳）"
+
+        yield event.plain_result(行)
 
     @爱瓦.command("战绩")
     async def 战绩(self, event: AstrMessageEvent):
@@ -510,15 +571,37 @@ class Main(Star):
     async def _问模型(self, event: AstrMessageEvent, 提示: str) -> str:
         """用当前会话的模型问一句话，返回它写的内容。
 
-        **必须设超时。** `tool_loop_agent` 底层是 HTTP 请求，上游（cliproxyapi /
-        各种 API）挂起时不会自己回来。实测锐评指令已经挂过2 分 43 秒、
-        日志里一行都没有——用户只看到「机器人不理人了」，我们却连它卡在哪
-        一步都不知道。超时会把它变成一条明确失败，而不是永久静默。
+        **直连 provider，不走 `tool_loop_agent`。**
+
+        线上实测：走 `tool_loop_agent` 时锐评稳定卡死 90 秒以上，日志里连
+        一行上游请求都看不到；而同一个 key、同一个模型直连
+        `/chat/completions` 只要 12 秒就回来了。所以问题不在上游、也不在
+        提示长度（实测提示 927 字）。
+
+        `tool_loop_agent` 是给「模型要调工具」的场景用的：它会把当前会话
+        挂着的**全部**工具 schema 塞进请求（这台机器装了十几个插件，
+        bilibili 一个就注册了 3 个 LLM tool），再走 runner 循环。而锐评、
+        开局、PK 全都是「拿一段数据换一段文字」，一个工具都不需要。
+
+        两处必须收紧：
+        1. 超时。底层是 HTTP，上游挂起时不会自己回来。实测锐评挂过 2 分
+           43 秒、日志一行没有——用户只看到「机器人不理人了」。
+        2. 重试。agent_runner 配了 `request_max_retries: 5`，叠满轻松超过
+           两分钟，所以这里显式压到 1 次。
         """
         try:
-            提供方 = await self.context.get_current_chat_provider_id(event.unified_msg_origin)
+            提供方 = await self.context.get_current_chat_provider_id(
+                event.unified_msg_origin
+            )
         except Exception as exc:
             raise RuntimeError(f"取不到当前对话用的模型：{exc}") from exc
+
+        try:
+            实例 = await self.context.provider_manager.get_provider_by_id(提供方)
+        except Exception as exc:
+            raise RuntimeError(f"取不到模型实例 {提供方!r}：{exc}") from exc
+        if 实例 is None:
+            raise RuntimeError(f"模型 {提供方!r} 不存在或没启用。")
 
         logger.info(
             f"[aiva] 调模型 provider={提供方!r} 提示{len(提示)}字，"
@@ -527,11 +610,10 @@ class Main(Star):
         起点 = time.monotonic()
         try:
             结果 = await asyncio.wait_for(
-                self.context.tool_loop_agent(
-                    event=event,
-                    chat_provider_id=提供方,
+                实例.text_chat(
                     prompt=提示,
-                    max_steps=8,
+                    system_prompt=_模型系统提示,
+                    request_max_retries=1,
                 ),
                 timeout=_模型超时,
             )
@@ -549,4 +631,6 @@ class Main(Star):
         用时 = time.monotonic() - 起点
         文本 = (getattr(结果, "completion_text", "") or "").strip()
         logger.info(f"[aiva] 模型用时{用时:.1f}秒，返回 {len(文本)} 字")
+        if not 文本:
+            raise RuntimeError(f"模型 {提供方} 返回了空内容，用时{用时:.1f}秒。")
         return 文本
