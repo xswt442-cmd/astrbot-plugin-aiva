@@ -126,7 +126,9 @@ class Test跳转超时预算:
         assert _跳转超时 <= 10, f"单跳 {_跳转超时} 秒太长，5 跳就过 50 秒了"
 
     def test_捕获列表含超时(self):
-        assert "except (TimeoutError, aiohttp.ClientError, OSError):" in 源码
+        assert (
+            "except (TimeoutError, aiohttp.ClientError, OSError)" in 源码
+        ), "网络异常必须被吃掉，不许穿透到 handler"
 
 
 class Test轮询异常归类:

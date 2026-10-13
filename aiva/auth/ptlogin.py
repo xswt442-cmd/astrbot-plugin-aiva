@@ -109,6 +109,9 @@ class 扫码会话:
         self._aegis = ""
         # 最近一次轮询拿回来的腾讯原始响应，只给调用方看（打日志 / 排查）。
         self.最近原文 = ""
+        # 跳转链的逐跳轨迹（URL / 状态 / 下一跳 / 正文摘要）。
+        # 只给调用方看：这个模块刻意不 import astrbot，好让本地 pytest 能跑。
+        self.跳转轨迹: list[str] = []
 
     async def 出码(self) -> bytes:
         """取一张二维码 PNG，同时把会话内部状态准备好。
@@ -229,19 +232,26 @@ class 扫码会话:
         # 必须跟「还没扫」区分开，否则用户只会看到一句「超时了」。
         raise RuntimeError("腾讯已确认扫码，但没取到 openid/access_token")
 
-    async def _追跳转(self, 地址: str, 最多: int = 5) -> 扫码结果 | None:
+    async def _追跳转(self, 地址: str, 最多: int = 12) -> 扫码结果 | None:
         """跟着跳转链走，从 auth:// 回调里捞出 openid 与 access_token。
 
         每一跳都套自己的短超时：会话的 `total=20` 是**整条请求**的预算，
-        而这里最多走 5 跳，用会话默认值得 100 秒——用户在群里发一句话
-        就能把 `sock_connect` 打断，冒出来的 `asyncio.TimeoutError` 会
-        一路穿透到 handler，把整条指令炸成「调用插件时出现异常」。
+        而这里要走的跳数不少，用会话默认值最坏能拖到一百多秒——用户在群里
+        发一句话就能把 `sock_connect` 打断，冒出来的 `asyncio.TimeoutError`
+        会一路穿透到 handler，把整条指令炸成「调用插件时出现异常」。
 
-        超时/网络抖动按「这一跳没拿到」处理，不当致命错误：继续走下一跳，
-        全部走完拿不到凭据就返回 None，让调用方按「还没扫完」处理。
+        腾讯这套登录链的形状不固定，实测见过三种「跳到下一跳」的方式：
+
+        1. HTTP 302，用响应头 `Location`；
+        2. 正文里的 ``location.href="..."`` / ``location.replace("...")``；
+        3. ``<meta http-equiv="refresh" content="0;url=...">``。
+
+        只认第1 种会在这里直接断链——`check_sig` 就是返回第 2 种的。
+        每跳都记进 `self.跳转轨迹`，出问题时能直接看清卡在哪。
         """
         if self._会话 is None:
             return None
+        self.跳转轨迹 = []
         当前 = 地址
         已走过: set[str] = set()
         for _ in range(最多):
@@ -250,6 +260,7 @@ class 扫码会话:
             已走过.add(当前)
             凭据 = _从地址提凭据(当前)
             if 凭据:
+                self._记轨迹(f"第{len(self.跳转轨迹) + 1}跳 地址里直接有凭据")
                 return 凭据
             if 当前.startswith("auth://"):
                 break
@@ -262,11 +273,24 @@ class 扫码会话:
                     headers={**_通用头, "Referer": _XLOGIN, "Accept": "*/*"},
                     timeout=aiohttp.ClientTimeout(total=_跳转超时),
                 ) as 响应:
+                    状态 = 响应.status
                     正文 = await 响应.text(errors="ignore")
                     下一位 = (响应.headers.get("Location", "") or "").strip()
-            except (TimeoutError, aiohttp.ClientError, OSError):
+            except (TimeoutError, aiohttp.ClientError, OSError) as exc:
                 # 单跳失败不是登录失败，继续试下一跳
+                self._记轨迹(
+                    f"{_短(当前)} -> 网络异常 {type(exc).__name__}: {exc}"
+                )
                 break
+
+            if not 下一位:
+                # 没有 302。那就看看正文里是用 JS 还是 meta 指向下一跳。
+                下一位 = _正文里的下一跳(正文)
+            self._记轨迹(
+                f"{_短(当前)} -> {状态} {_短(下一位) if 下一位 else '(无下一跳)'} "
+                f"正文{len(正文)}字 {_短(正文, 120)!r}"
+            )
+
             if 下一位:
                 当前 = 下一位
                 continue
@@ -280,6 +304,10 @@ class 扫码会话:
                 return 凭据
             break
         return None
+
+    def _记轨迹(self, 一句: str) -> None:
+        """记一跳。轨迹要留着给调用方打日志，登录态相关的值不能进日志。"""
+        self.跳转轨迹.append(一句)
 
     def _取cookie(self, 名字: str) -> str:
         if self._会话 is None:
@@ -295,6 +323,46 @@ class 扫码会话:
             self._会话 = None
 
 
+def _正文里的下一跳(正文: str) -> str:
+    """从一段正文里找出「下一跳该去哪」。
+
+    腾讯的 `check_sig` 之类接口不返回 302，而是在正文里用 JS 指向下一跳。
+    常见三种，按可靠性排序：
+
+    1. ``location.href = "..."`` / ``location.replace("...")`` / ``location.assign``
+    2. ``<meta http-equiv="refresh" content="0;url=...">``
+    3. ``window.location = "..."``
+
+    正文里的 ``\\x26`` 是被转义过的 ``&``，``\\/`` 是转义过的 ``/``，
+    不还原的话拼出来的 URL 会少参数。
+    """
+    if not 正文:
+        return ""
+    还原 = 正文.replace("\\/", "/").replace("\\x26", "&").replace("\\u0026", "&")
+
+    # 排除明显不是「下一跳」的：about:blank、javascript:、data:、纯锚点。
+    模式 = (
+        r"""(?:window\.)?location(?:\.href)?\s*(?:=|\.replace\(|\.assign\()\s*"""
+        r"""["']([^"']+)["']"""
+        r"""|http-equiv=["']?refresh["']?[^>]*?content=["'][^"']*?url=([^"']+)["']"""
+        r"""|window\.location\s*=\s*["']([^"']+)["']"""
+    )
+    m = re.search(模式, 还原, re.IGNORECASE)
+    if not m:
+        return ""
+    候选 = next((g for g in m.groups() if g), "")
+    候选 = 候选.strip()
+    if not 候选 or 候选.startswith(("about:", "javascript:", "data:", "#")):
+        return ""
+    return 候选
+
+
+def _短(文本: str, 长度: int = 80) -> str:
+    """把 URL 或正文压短，便于进日志。"""
+    s = (文本 or "").replace("\n", " ").replace("\r", " ")
+    return s if len(s) <= 长度 else f"{s[:长度]}…"
+
+
 def _从地址提凭据(文本: str) -> 扫码结果 | None:
     """从 auth:// 回调（或含它的一段正文）里取 openid 与 access_token。
 
@@ -303,7 +371,9 @@ def _从地址提凭据(文本: str) -> 扫码结果 | None:
     """
     if not 文本:
         return None
-    取 = 文本.replace("\\/", "/").replace("\\x26", "&")
+    取 = 文本
+    for 转义 in ("\\/", "\\x26", "\\u0026"):
+        取 = 取.replace(转义, "/" if 转义 == "\\/" else "&")
     if "#" in 取:
         取 = 取.replace("#", "&", 1)
     m = re.search(r"(auth://[^\s\"'<>]+)", 取)

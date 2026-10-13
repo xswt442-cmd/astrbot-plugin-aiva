@@ -67,10 +67,15 @@ class Test轮询循环结构:
         assert 循环, "绑定 handler 里应该有 while 循环按时间推进"
 
     def test_没有for_else残留(self):
-        """原来 for...else 结构已被while + 显式收工取代。"""
-        绑定 = ast.get_source_segment(主源码, _绑定函数()) or ""
-        assert "for _ in range" not in 绑定
-        assert "else:" not in 绑定
+        """原来 for...else 结构已被 while + 显式收工取代。
+
+        注意只能查 for 节点的orelse：except 分支里出现 else: 完全是合法的。
+        """
+        for 节点 in ast.walk(_绑定函数()):
+            if isinstance(节点, ast.For):
+                assert 节点.orelse == [], (
+                    "for...else 结构已废弃，预算必须靠墙钟而不是次数"
+                )
 
     def test_下一拍按节奏累加(self):
         """慢的请求不该把节奏拖长：从节奏点累加，不是 sleep(固定) 起步。"""
@@ -93,6 +98,18 @@ class Test区分不出码原因:
         """文案必须说清不是用户扫错，否则下次还会被误解成操作问题。"""
         绑定 = ast.get_source_segment(主源码, _绑定函数()) or ""
         assert "在你扫之前就过期了" in 绑定
+
+    def test_过期与解析失败分开说(self):
+        """「码过期」是我们慢，「解析失败」是我们的 bug，文案不能混。
+        混了就会让用户反复扫码，而真正要修的是解析。"""
+        绑定 = ast.get_source_segment(主源码, _绑定函数()) or ""
+        assert "这不是你的问题" in 绑定
+        assert '"过期" in str(exc)' in 绑定, "两种失败必须靠判断分叉，不能共用一句文案"
+
+    def test_解析失败时把跳转轨迹打进日志(self):
+        """下一次能不能定位，全看轨迹有没有记全。"""
+        绑定 = ast.get_source_segment(主源码, _绑定函数()) or ""
+        assert "跳转轨迹" in 绑定
 
     def test_每轮记腾讯原始返回(self):
         绑定 = ast.get_source_segment(主源码, _绑定函数()) or ""
