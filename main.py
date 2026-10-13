@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from pathlib import Path
 from typing import Any
 
@@ -42,10 +43,15 @@ _组名 = "爱瓦"
 # 加一个带斜杠的别名，两种写法都能进。
 _组别名 = {f"/{_组名}"}
 
-# 扫码轮询：每 2 秒一次，最多 25 次。二维码约 60 秒失效，取 50 秒就不会
-# 让用户对着一张已经不能扫的图继续等。
-_轮询间隔 = 2.0
-_轮询次数 = 25
+# 扫码轮询：目标节奏每 2 秒一次，但**按墙钟掐表**，不按次数。
+#
+# 出码到二维码失效约 60 秒（从出码那一刻起算，不是从第一轮轮询起算）。
+# 原来写的是「先 sleep(2) 再发请求」，而服务器到腾讯这一跳实测要 ~3 秒，
+# 于是每轮实际占 5 秒，25 轮拉成 125 秒——等问到第 20 轮时腾讯早把码作废了，
+# 白白让用户对着废码扫半天。现在改成：记下截止时刻，每轮补足到下一个节奏点，
+# 网络慢就从预算里扣，慢到超预算就立刻收工。
+_轮询节奏 = 2.0
+_轮询预算 = 55.0
 
 _帮助文本 = """爱瓦 · 无畏契约国服战绩查询
 
@@ -189,24 +195,60 @@ class Main(Star):
                 ]
             )
 
-            for _ in range(_轮询次数):
-                await asyncio.sleep(_轮询间隔)
+            # 从**出码那一刻**起掐表：二维码的寿命是从出码开始算的，
+            # 晚一帧问就少一帧可用时间。
+            截止 = time.monotonic() + _轮询预算
+            下一拍 = time.monotonic()
+            问了几轮 = 0
+            while True:
+                现在 = time.monotonic()
+                if 现在 >= 截止:
+                    logger.info(f"[aiva] 扫码轮询耗尽预算，共问{问了几轮} 轮")
+                    yield event.plain_result(
+                        "扫码超时了。二维码只有一分钟有效期，扫完记得点确认。\n"
+                        "重新发 /爱瓦 绑定 再试一次。"
+                    )
+                    return
+
+                # 补足到下一个节奏点。网络慢就从预算里扣，不会像原来那样
+                # 把轮询周期越拖越长。
+                await asyncio.sleep(max(0.0, 下一拍 - 现在))
+                if time.monotonic() >= 截止:
+                    logger.info(f"[aiva] 补觉期间预算耗尽，共问{问了几轮} 轮")
+                    yield event.plain_result("扫码超时了。重新发 /爱瓦 绑定。")
+                    return
+
+                问了几轮 += 1
+                下一拍 += _轮询节奏
                 try:
                     结果 = await 会话.轮询一次()
                 except RuntimeError as exc:
-                    yield event.plain_result(f"扫码失败：{exc}。重新发 /爱瓦 绑定。")
+                    logger.info(
+                        f"[aiva] 第{问了几轮}轮腾讯判定二维码废了：{exc}"
+                        f" 原始返回={getattr(会话, '最近原文', '')[:160]!r}"
+                    )
+                    # 这条大概率不是用户没扫，而是**我们问得太慢**：
+                    # 服务器到腾讯这一跳实测要 ~3 秒，节奏算错就会在用户
+                    # 扫完之前就问成「过期」。别让他以为自己手抖。
+                    yield event.plain_result(
+                        f"扫码失败：{exc}。\n"
+                        "这张码已经在你扫之前就过期了（服务器问腾讯比较慢），"
+                        "重新发 /爱瓦 绑定 再试一次。"
+                    )
                     return
                 except asyncio.TimeoutError:
                     # 扫码期间网络抖一下不该把整条指令炸掉——那会在群里弹出
                     # 「在调用插件 astrbot_plugin_aiva 的处理函数 绑定 时出现异常」。
                     # 单次失败按「还没扫完」处理，继续轮询。
-                    logger.warning("[aiva] 扫码轮询超时，继续等")
+                    logger.warning(f"[aiva] 第{问了几轮}轮轮询超时，继续等")
                     continue
                 if 结果:
+                    logger.info(f"[aiva] 第{问了几轮}轮拿到扫码结果")
                     break
-            else:
-                yield event.plain_result("扫码超时了。重新发 /爱瓦 绑定。")
-                return
+                logger.debug(
+                    f"[aiva] 第{问了几轮}轮未确认，腾讯返回 "
+                    f"{getattr(会话, '最近原文', '')[:160]!r}"
+                )
 
             传输 = 掌瓦传输()
             try:

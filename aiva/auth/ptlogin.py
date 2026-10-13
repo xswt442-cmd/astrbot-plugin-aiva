@@ -107,6 +107,8 @@ class 扫码会话:
         self._登录_sig = ""
         self._jsver = "28d22679"
         self._aegis = ""
+        # 最近一次轮询拿回来的腾讯原始响应，只给调用方看（打日志 / 排查）。
+        self.最近原文 = ""
 
     async def 出码(self) -> bytes:
         """取一张二维码 PNG，同时把会话内部状态准备好。
@@ -200,6 +202,9 @@ class 扫码会话:
         ) as 响应:
             文本 = await 响应.text(errors="ignore")
 
+        # 原样留一份给调用方打日志。这个模块刻意不 import astrbot
+        # （本地 pytest 要能直接跑），所以日志由 main.py 负责。
+        self.最近原文 = 文本
         return await self._拆回调(文本)
 
     async def _拆回调(self, 文本: str) -> 扫码结果 | None:
@@ -219,7 +224,10 @@ class 扫码会话:
         凭据 = await self._追跳转(跳转)
         if 凭据 and 凭据.openid and 凭据.access_token:
             return 凭据
-        return None
+        # code=0 表示腾讯那边判定「扫了并确认了」，但我们没从跳转链里捞到
+        # openid/access_token。这是**我们**的解析问题，不是用户没扫——
+        # 必须跟「还没扫」区分开，否则用户只会看到一句「超时了」。
+        raise RuntimeError("腾讯已确认扫码，但没取到 openid/access_token")
 
     async def _追跳转(self, 地址: str, 最多: int = 5) -> 扫码结果 | None:
         """跟着跳转链走，从 auth:// 回调里捞出 openid 与 access_token。
