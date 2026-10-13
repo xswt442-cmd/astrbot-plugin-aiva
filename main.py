@@ -84,15 +84,22 @@ class 这句给用户(Exception):
 
 
 class _落空兜底(CustomFilter):
-    """`/爱瓦 <不是子命令>` 时自己接住，别让消息流到模型手里。"""
+    """`/爱瓦 <不是子命令>` 时自己接住，别让消息流到模型手里。
+
+    `filter` 的返回值语义是「这条消息我管不管」，**不是**「我有没有命中」——
+    `CommandGroupFilter.filter` 里`if not self.custom_filter_ok(...): return False`，
+    返回 False 会把整个指令组毙掉。所以这里恒返回 True：命中就自己给结果并
+    `stop_event()`，没命中就放行给子指令。写成「命中返回 False」会让
+    `/爱瓦 绑定` 这种正常指令完全没反应。
+    """
 
     def filter(self, event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
         文本 = getattr(event, "message_str", "") or ""
-        if not 是否落空(文本, _组名):
-            return False
-
-        event.set_result(MessageEventResult().message(落空提示(取落空参数(文本, _组名))))
-        event.stop_event()
+        if 是否落空(文本, _组名):
+            event.set_result(
+                MessageEventResult().message(落空提示(取落空参数(文本, _组名)))
+            )
+            event.stop_event()
         return True
 
 

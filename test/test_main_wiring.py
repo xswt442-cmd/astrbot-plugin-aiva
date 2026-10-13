@@ -58,6 +58,34 @@ class Test组名:
         文本 = main源.read_text(encoding="utf-8")
         assert "是否落空(文本, _组名)" in 文本
 
+    def test_兜底过滤器恒返回True(self):
+        """`CustomFilter.filter` 返回 False 会让整个指令组被跳过。
+
+        AstrBot 的 `CommandGroupFilter.filter` 里是
+        `if not self.custom_filter_ok(...): return False`——返回值的语义是
+        「这条消息我管不管」，不是「命中没有」。所以兜底过滤器必须恒返回
+        True：命中就自己 set_result + stop_event，没命中就放行。
+        写成「命中返回 False」时 `/爱瓦 绑定` 完全没反应。
+        """
+        方法 = _兜底过滤器()
+        返回 = [
+            节点.value.value
+            for 节点 in ast.walk(方法)
+            if isinstance(节点, ast.Return) and isinstance(节点.value, ast.Constant)
+        ]
+        assert 返回 == [True], f"兜底 filter 里出现了 {返回}，必须只return True"
+        # 命中分支必须 set_result + stop_event，否则消息会漏给模型
+        assert "event.stop_event()" in ast.unparse(方法)
+
+
+def _兜底过滤器() -> ast.FunctionDef:
+    for 节点 in _树().body:
+        if isinstance(节点, ast.ClassDef) and 节点.name == "_落空兜底":
+            for 体 in 节点.body:
+                if isinstance(体, ast.FunctionDef) and 体.name == "filter":
+                    return 体
+    raise AssertionError("main.py 里没有 _落空兜底.filter")
+
 
 class Test兜底同步:
     def test_每个指令都在兜底名单里(self):
