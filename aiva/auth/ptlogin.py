@@ -48,21 +48,9 @@ _APPID = "716027609"
 _DAID = "381"
 _第三方AID = "102061775"
 
-# 跳转链每一跳单独给 12 秒。这个数不是拍脑袋：实测`check_sig` 从这台服务器
-# 走不通（DNS 解析成 0.0.0.1，腾讯云 EGL 的内网屏蔽），而能通的腾讯登录接口
-# 单跳要3 秒左右。留够余量，别让一个本来能成功的跳转死在超时上。
-_跳转超时 = 12.0
-
-# 腾讯云内网把 `ptlogin4.openmobile.qq.com` 解析成 **0.0.0.1**（黑洞），
-# 而同一批的 `ptlogin4.qq.com` 解析正常。跳转链里凡是被扔进黑洞主机的地址，
-# 都换成同尾号的 `.qq.com`。实测 `*.qq.com` 那套能 0.1 秒返回，不是网络慢。
-# 只改主机名，路径和查询串原样保留。
-_黑洞主机 = "ptlogin4.openmobile.qq.com"
-_黑洞替补 = "ptlogin4.qq.com"
-
-# 腾讯云 CDN 对无效请求（比如过期的 ptsigx）会302 到 www.qq.com。
-# 那不是登录链的一环，跟着走只会白烧预算，直接判定链断了。
-_兜底落点 = ("www.qq.com", "qq.com/")
+# 跳转链每一跳单独给 5 秒。会话的 total=20 是单条请求预算，而 _追跳转 最多走
+# 5 跳，沿用值得100 秒——用户在群里发一句话就能把sock_connect 打断。
+_跳转超时 = 5.0
 
 _UA = (
     "Mozilla/5.0 (Linux; Android 12; 23117RK66C Build/V417IR; wv) "
@@ -278,12 +266,9 @@ class 扫码会话:
                 break
             正文 = ""
             下一位 = ""
-            去哪 = _躲黑洞(当前)
-            if 去哪 != 当前:
-                self._记轨迹(f"主机 {_黑洞主机} 被解析成 0.0.0.1，改走 {_黑洞替补}")
             try:
                 async with self._会话.get(
-                    去哪,
+                    当前,
                     allow_redirects=False,
                     headers={**_通用头, "Referer": _XLOGIN, "Accept": "*/*"},
                     timeout=aiohttp.ClientTimeout(total=_跳转超时),
@@ -301,10 +286,6 @@ class 扫码会话:
             if not 下一位:
                 # 没有 302。那就看看正文里是用 JS 还是 meta 指向下一跳。
                 下一位 = _正文里的下一跳(正文)
-            elif any(落 in 下一位 for 落 in _兜底落点):
-                # 无效 ptsigx 会被 CDN 甩到 www.qq.com，那不是登录链的一环。
-                self._记轨迹(f"下一跳落到 CDN 兜底页 {_短(下一位)}，登录链到此为止")
-                break
             self._记轨迹(
                 f"{_短(当前)} -> {状态} {_短(下一位) if 下一位 else '(无下一跳)'} "
                 f"正文{len(正文)}字 {_短(正文, 120)!r}"
@@ -374,21 +355,6 @@ def _正文里的下一跳(正文: str) -> str:
     if not 候选 or 候选.startswith(("about:", "javascript:", "data:", "#")):
         return ""
     return 候选
-
-
-def _躲黑洞(地址: str) -> str:
-    """把解析成 0.0.0.1 的主机名换成同尾号的可解析主机。
-
-    腾讯云内网把 `ptlogin4.openmobile.qq.com` 解析成 `0.0.0.1`，
-    TCP 连得上但不回一个字节，于是表现为「请求永远超时」。
-    `ptlogin4.qq.com` 解析正常（实测 0.1 秒返回 302）。
-
-    这里只换主机名：路径、查询串、以及 `Host` 头语义都不动。
-    换不换都先记进轨迹，排查时能看出到底有没有走这条路。
-    """
-    if _黑洞主机 not in 地址:
-        return 地址
-    return 地址.replace(_黑洞主机, _黑洞替补, 1)
 
 
 def _短(文本: str, 长度: int = 80) -> str:
