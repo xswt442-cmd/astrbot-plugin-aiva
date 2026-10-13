@@ -93,6 +93,16 @@ class Test调模型:
         assert "asyncio.wait_for(" in 体
         assert "_模型超时" in 体
 
+    def test_超时后必须换新请求重试(self):
+        """23:52 的 PK 实测：上游偶发挂起，同提示直连 17 秒能过，
+        挂起的那条连接等满 90 秒也不回。挂起的连接不会自己恢复，
+        唯一有效动作是重开一条。"""
+        体 = _函数体内("_问模型")
+        assert 体.count("asyncio.wait_for(") >= 2, (
+            "超时后必须用新请求重试一次，不能只失败一次就放弃"
+        )
+        assert "重试" in 体
+
     def test_必须压低重试次数(self):
         体 = _函数体内("_问模型")
         assert "request_max_retries=1" in 体, (

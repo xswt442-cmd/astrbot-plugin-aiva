@@ -690,8 +690,7 @@ class Main(Star):
             f"[aiva] 调模型 provider={提供方!r} 提示{len(提示)}字，"
             f"最多等 {_模型超时}秒"
         )
-        起点 = time.monotonic()
-        try:
+        async def 打一次() -> str:
             结果 = await asyncio.wait_for(
                 实例.text_chat(
                     prompt=提示,
@@ -700,19 +699,39 @@ class Main(Star):
                 ),
                 timeout=_模型超时,
             )
+            return (getattr(结果, "completion_text", "") or "").strip()
+
+        # **超时后换新请求重试一次**。挂起的连接不会自己恢复——23:52 的
+        # PK 实测：同样 2400 字的提示，直连压测 17 秒返回，这次却挂满
+        # 90 秒。上游偶发抽风，唯一有效动作是放弃这条连接重开一条。
+        # 重试用同样的超时，最坏 2×90=180 秒，仍远好于无限等。
+        起点 = time.monotonic()
+        try:
+            文本 = await 打一次()
         except asyncio.TimeoutError:
             用时 = time.monotonic() - 起点
             logger.warning(
-                f"[aiva] 调模型超过 {_模型超时}秒（实际{用时:.0f}秒）放弃，"
-                f"provider={提供方!r}"
+                f"[aiva] 调模型第1次超过 {_模型超时}秒（实际{用时:.0f}秒），"
+                f"换新请求重试，provider={提供方!r}"
             )
-            raise RuntimeError(
-                f"模型 {_模型超时}秒没回话（provider={提供方}）。"
-                "上游可能挂了，稍后再试。"
-            ) from None
+            重试起点 = time.monotonic()
+            try:
+                文本 = await 打一次()
+                logger.info(
+                    f"[aiva] 重试用时{time.monotonic() - 重试起点:.1f}秒成功"
+                )
+            except asyncio.TimeoutError:
+                总用时 = time.monotonic() - 起点
+                logger.warning(
+                    f"[aiva] 调模型两次共 {总用时:.0f}秒都没回话，放弃，"
+                    f"provider={提供方!r}"
+                )
+                raise RuntimeError(
+                    f"模型连试两次共 {总用时:.0f}秒没回话"
+                    f"（provider={提供方}）。上游可能挂了，稍后再试。"
+                ) from None
 
         用时 = time.monotonic() - 起点
-        文本 = (getattr(结果, "completion_text", "") or "").strip()
         logger.info(f"[aiva] 模型用时{用时:.1f}秒，返回 {len(文本)} 字")
         if not 文本:
             raise RuntimeError(f"模型 {提供方} 返回了空内容，用时{用时:.1f}秒。")
