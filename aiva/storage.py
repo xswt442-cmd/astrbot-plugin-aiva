@@ -25,8 +25,10 @@ __all__ = [
     "凭据是否齐全",
     "凭据摘要",
     "记绑定时间",
+    "记昵称",
     "已绑多久",
     "该提醒重绑",
+    "找同名的人",
 ]
 
 _文件后缀 = ".json"
@@ -59,6 +61,47 @@ def 记绑定时间(凭据: dict[str, Any]) -> dict[str, Any]:
     """在凭据上盖一个绑定时间戳，返回同一个对象（就地改）。"""
     凭据["绑定于"] = int(time.time())
     return 凭据
+
+
+def 记昵称(凭据: dict[str, Any], 昵称: str) -> dict[str, Any]:
+    """记下平台显示名，PK 时靠它认人（就地改，返回同一对象）。
+
+    **为什么必须有这个**：QQ 官方机器人**收不到 @别人**。
+    实测 `raw_message.mentions == []`——平台压根没把被 @ 的人传下来
+    （不是适配器过滤掉的，是服务端没给）。组件链里只有 @机器人 一个。
+    所以 PK 在 QQ 官方上只能靠名字认人。
+    """
+    值 = str(昵称 or "").strip()
+    if 值:
+        凭据["昵称"] = 值[:_昵称上限]
+    return 凭据
+
+
+_昵称上限 = 32
+
+
+def 找同名的人(
+    仓库: "凭据仓库", 关键词: str, *, 自己: str = ""
+) -> list[tuple[str, str]]:
+    """在所有已绑定的人里找昵称匹配 `关键词` 的，返回 `[(用户标识, 昵称)]`。
+
+    匹配规则：忽略大小写 + 去空格 + 子串包含。`znne` 能匹配到 `ZnNe`，
+    `YJJ` 能匹配到 `yjj`。返回全部候选而不只第一个——重名时让用户自己选，
+    挑错人等于拿错人的战绩。
+    """
+    词 = "".join(str(关键词 or "").split()).lower()
+    if not 词:
+        return []
+    命中 = []
+    for 用户, 凭据 in 仓库.全部():
+        if 自己 and 用户 == 自己:
+            continue  # 自己跟自己比没意义
+        名 = str(凭据.get("昵称") or "")
+        if not 名:
+            continue
+        if 词 in "".join(名.split()).lower():
+            命中.append((用户, 名))
+    return 命中
 
 
 def 已绑多久(凭据: dict[str, Any]) -> int | None:
@@ -94,6 +137,9 @@ class 凭据仓库:
     def 写入(self, 用户: str, 凭据: dict[str, Any]) -> None:
         路径 = self.路径(用户)
         路径.parent.mkdir(parents=True, exist_ok=True)
+        # 文件名是 SHA-256 摘要，**反查不出用户标识**。要按昵称找人就必须
+        # 把它明文存进文件里（`用户标识`），否则只能靠遍历比对哈希。
+        凭据["用户标识"] = 用户
         载荷 = json.dumps(凭据, ensure_ascii=False, indent=2)
         # 临时文件 + 替换：写到一半崩了也不会留下半个凭据文件。
         临时 = 路径.with_suffix(f"{_文件后缀}.tmp")
@@ -104,6 +150,29 @@ class 凭据仓库:
         except OSError:
             # Windows 上 chmod 不是完整 ACL；任务失败不影响可用性。
             pass
+
+    def 全部(self) -> list[tuple[str, dict[str, Any]]]:
+        """列出所有绑定，返回 `[(用户标识, 凭据)]`。
+
+        老文件（`用户标识`/`昵称` 都在本版本才开始记）会**被跳过**：
+        它们既认不出人也没名字，对 PK / 排行榜毫无用处。重新绑定一次就有了。
+        """
+        出 = []
+        try:
+            条目 = sorted(self.目录.glob(f"*{_文件后缀}"))
+        except OSError:
+            return 出
+        for 路径 in 条目:
+            try:
+                凭据 = json.loads(路径.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(凭据, dict):
+                continue
+            用户 = str(凭据.get("用户标识") or "").strip()
+            if 用户 and self.路径(用户) == 路径:
+                出.append((用户, 凭据))
+        return 出
 
     def 删除(self, 用户: str) -> bool:
         路径 = self.路径(用户)

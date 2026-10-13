@@ -11,7 +11,9 @@ API：Riot 官方 API 只覆盖国际服，`api.riotgames.cn` 实测 DNS 无记�
 from __future__ import annotations
 
 import asyncio
+import json
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -27,7 +29,7 @@ from astrbot.core.star.filter.custom_filter import CustomFilter
 # 阶段报错，而不是等用户发了指令才在懒加载里抛模块不存在。
 from .aiva.auth.ptlogin import 扫码会话
 from .aiva.match import 开局设定, 设定文本
-from .aiva.pk import 找对手, 从提及里找对手
+from .aiva.pk import 从原始载荷认对手, 找对手, 从提及里找对手, 提及摘要
 from .aiva.prompts import PK提示, 开局提示, 锐评提示
 from .aiva.stats import 占优项数, 对比文本, 对比要点, 聚合, 近况文本
 from .aiva.storage import (
@@ -37,6 +39,8 @@ from .aiva.storage import (
     已绑多久,
     该提醒重绑,
     记绑定时间,
+    记昵称,
+    找同名的人,
 )
 from .aiva.transport import (
     业务错误,
@@ -115,6 +119,23 @@ _帮助文本 = """爱瓦 · 无畏契约国服战绩查询
   显示这条消息。"""
 
 _昵称上限 = 16
+
+# PK 指令后面跟的名字。`message_str` 在 QQ 官方上已经被适配器剥掉
+# `/爱瓦` 前缀和所有 @，剩下的就是「PK 后面那一截」。
+_PK后缀 = re.compile(
+    rf"{re.escape(_组名)}\s*(?:PK|pk|对战)\s*(.+)", re.IGNORECASE
+)
+
+
+def _PK里的名字(正文: str) -> str:
+    """从指令正文里抠出要比的人的名字。
+
+    「/爱瓦 PK YJJ」→ `YJJ`。抠不出返回空串。
+    """
+    命中 = _PK后缀.search(str(正文 or ""))
+    if not 命中:
+        return ""
+    return 命中.group(1).strip().strip("：:@")[:_昵称上限]
 
 
 class 这句给用户(Exception):
@@ -307,7 +328,12 @@ class Main(Star):
                 yield event.plain_result("登录成功但拿不到完整凭证（缺 userId 或 tid），请重试。")
                 return
 
-            self._凭据.写入(用户, 记绑定时间(凭据))
+            # 昵称是 PK 认人的唯一兜底（QQ 官方收不到 @别人），
+            # 每次绑定都刷新一次——用户改了群昵称也能跟上。
+            self._凭据.写入(
+                用户,
+                记昵称(记绑定时间(凭据), self._名字(event)),
+            )
             logger.info(f"[aiva] 用户 {用户} 绑定成功")
             yield event.plain_result(
                 f"✅ 绑定成功（{凭据摘要(凭据)}）。\n\n现在可以发 /爱瓦 战绩。"
@@ -474,43 +500,61 @@ class Main(Star):
         消息 = getattr(event, "message_obj", None)
         机器人 = str(getattr(event, "self_id", "") or "")
         原始 = getattr(消息, "raw_message", None)
+        正文 = str(getattr(event, "message_str", "") or "")
 
-        # **每一次 PK 都打这几行**，不管认没认出来。
-        # 之前这个指令报「没认出要和谁比」时日志里一行都没有，只能靠读
-        # 适配器源码反推——但源码只告诉我适配器丢了什么，没告诉我实际
-        # 传进来什么。找不到对手时这几行是唯一线索。
-        提及 = [
-            {
-                "id": getattr(项, "id", None),
-                "username": getattr(项, "username", None),
-                "is_you": getattr(项, "is_you", None),
-                "bot": getattr(项, "bot", None),
-            }
-            for 项 in (getattr(原始, "mentions", None) or [])
-        ]
+        # QQ 官方机器人**收不到 @别人**：`raw_message.mentions` 实测是 `[]`，
+        # 平台压根没把被 @ 的人传下来（不是适配器过滤，是服务端没给）。
+        # 但适配器把 QQ 原始 payload 存进了 `raw_message.raw_data`，
+        # 还有 `msg_elements`——@ 元素应该在那里面。
         logger.info(
-            f"[aiva] PK 找对手：自己={自己!r} self_id={机器人!r}"
-            f"\n  raw_message={type(原始).__name__}"
-            f"\n  mentions={提及!r}"
-            f"\n  组件链={[getattr(c, 'type', None) for c in (getattr(消息, 'message', None) or [])]!r}"
-            f"\n  message_str={getattr(event, 'message_str', '')[:120]!r}"
+            f"[aiva] PK 找对手：自己={自己!r}"
+            f"\n  mentions={提及摘要(原始)!r}"
+            f"\n  msg_elements={json.dumps(getattr(原始, 'msg_elements', None), ensure_ascii=False)[:600]!r}"
+            f"\n  raw_data 键={list((getattr(原始, 'raw_data', None) or {}).keys())!r}"
+            f"\n  raw_data.content={(getattr(原始, 'raw_data', None) or {}).get('content')!r}"
+            f"\n  raw_data.mentions={json.dumps((getattr(原始, 'raw_data', None) or {}).get('mentions'), ensure_ascii=False)[:400]!r}"
+            f"\n  message_str={正文[:120]!r}"
         )
 
-        # QQ 官方平台上组件链和正文都拿不到 @别人 的 ID（适配器只转
-        # `is_you` 的），必须回头读 `raw_message.mentions`。详见 aiva/pk.py。
-        对手标识 = 从提及里找对手(原始, 自己=自己, 机器人=机器人)
+        对手标识 = _从原始载荷认对手(原始, 自己=自己, 机器人=机器人)
+        来源 = "raw_data"
+        if not 对手标识:
+            对手标识 = 从提及里找对手(原始, 自己=自己, 机器人=机器人)
+            来源 = "mentions"
         if not 对手标识:
             对手标识 = 找对手(
                 getattr(消息, "message", None) or [],
-                getattr(event, "message_str", "") or "",
+                正文,
                 自己=自己,
                 机器人=机器人,
             )
-        logger.info(f"[aiva] PK 认出对手={对手标识!r}")
+            来源 = "组件链/正文"
+        if not 对手标识:
+            关键词 = _PK里的名字(正文)
+            候选 = 找同名的人(self._凭据, 关键词, 自己=自己) if 关键词 else []
+            if len(候选) == 1:
+                对手标识, 来源 = 候选[0][0], "昵称"
+            elif len(候选) > 1:
+                yield event.plain_result(
+                    "「{关键词}」匹配到几个人，说清楚点：\n"
+                    + "\n".join(f"· {名}" for _, 名 in 候选)
+                )
+                return
+            elif 关键词:
+                yield event.plain_result(
+                    f"没找到叫「{关键词}」的绑定用户。"
+                    "让他先发 /爱瓦 绑定。"
+                )
+                return
+
+        logger.info(f"[aiva] PK 认出对手={对手标识!r}（来源={来源}）")
         if not 对手标识:
             yield event.plain_result(
-                "没认出要和谁比。发「/爱瓦 PK @群友」，@ 到那个人才行——\n"
-                "对方也必须自己绑过（绑定只限制本人查自己，插件不会替你去查别人）。"
+                "没认出要和谁比。\n"
+                "发「**/爱瓦 PK 群友昵称**」——直接写名字最稳。\n\n"
+                "（QQ 官方机器人收不到 @别人，插件这边确实拿不到 @ 出来"
+                "那个人的身份。）\n"
+                "对方得自己发过 /爱瓦 绑定，插件不会替你去查别人。"
             )
             return
 
