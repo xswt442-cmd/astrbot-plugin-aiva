@@ -328,3 +328,23 @@ class Test导入齐全:
     def test_用到的符号在导入段出现过(self, 名字: str):
         文本 = main源.read_text(encoding="utf-8")
         assert 名字 in 文本
+
+
+class Test日志出口:
+    """插件规范：logger 必须且只能从 `astrbot.api` 取，不许用内置 `logging`。
+
+    爱农上架审核第一次就是被这一条驳回的（`ainong/auth/` 下两个模块用了内置
+    `logging`，只看 main.py 查不出来）。这里扫整个包，防止同样的写法溜进来。
+    """
+
+    def test_包内不用内置logging(self):
+        违规 = [
+            路径.name
+            for 路径 in sorted(main源.parent.joinpath("aiva").rglob("*.py"))
+            if re.search(r"^\s*(?:import logging|from logging)\b", 路径.read_text("utf-8"), re.M)
+        ]
+        assert not 违规, f"这些文件用了内置 logging，要改成从 astrbot.api 取：{违规}"
+
+    def test_logger_从_astrbot_取(self):
+        源码 = main源.read_text(encoding="utf-8")
+        assert re.search(r"^from astrbot\.api import .*\blogger\b", 源码, re.M)
