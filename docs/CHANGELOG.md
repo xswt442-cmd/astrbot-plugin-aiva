@@ -5,6 +5,19 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.5] - 2026-10-17
+
+### 修正
+
+- **数据目录改用插件名。** 市场审核驳回：规则是 `data/plugin_data/<plugin_name>`，
+  `<plugin_name>` 指插件目录名，原来用的是 `plugin_data/aiva`。现在走
+  `StarTools.get_data_dir("astrbot_plugin_aiva")`。老目录里的凭据在首次启动时
+  自动搬过去（只搬不覆盖），搬完删掉空目录，用户不用重新绑定。
+- **恢复 TLS 证书校验。** `aiva/transport.py` 原来用 `CERT_NONE` 关掉校验，
+  而请求里带 openid / access_token / tid，等于把这些交给中间人。现在用 aiohttp
+  默认上下文（校验证书链与主机名）；容器缺 CA 请装 `ca-certificates`，
+  不要全局降级。
+
 ## [0.2.4] - 2026-10-17
 
 ### 变更

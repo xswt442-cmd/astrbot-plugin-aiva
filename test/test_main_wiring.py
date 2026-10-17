@@ -350,3 +350,28 @@ class Test日志出口:
     def test_logger_从_astrbot_取(self):
         源码 = main源.read_text(encoding="utf-8")
         assert re.search(r"^from astrbot\.api import .*\blogger\b", 源码, re.M)
+
+
+class Test审核合规:
+    """市场审核的硬要求，驳回一次就要重提一个版本号，钉死。"""
+
+    def test_数据目录用插件名(self):
+        """规则是 `data/plugin_data/<plugin_name>`，`<plugin_name>` 指目录名。"""
+        源码 = main源.read_text(encoding="utf-8")
+        assert "StarTools.get_data_dir(_插件名)" in 源码
+        assert '_插件名 = "astrbot_plugin_aiva"' in 源码
+        assert '"plugin_data" / "aiva"' not in 源码
+
+    def test_旧目录会被迁移(self):
+        """升级不能把已有绑定丢掉。"""
+        源码 = main源.read_text(encoding="utf-8")
+        assert "_迁移旧凭据(目录)" in 源码
+        assert '_旧数据目录名 = "aiva"' in 源码
+
+    def test_不关_TLS_校验(self):
+        """请求里带 openid/access_token/tid，关掉校验等于交给中间人。"""
+        传输 = (源码目录 / "aiva" / "transport.py").read_text(encoding="utf-8")
+        assert "CERT_NONE" not in 传输
+        assert "check_hostname = False" not in 传输
+        assert "verify_mode" not in 传输
+        assert "ssl=" not in 传输

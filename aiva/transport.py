@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import json
-import ssl
 import time
 from collections.abc import Callable
 from typing import Any
@@ -57,18 +56,6 @@ class 业务错误(Exception):
 
 class 登录过期(业务错误):
     """登录态失效，需要重新扫码。"""
-
-
-def _不校验的SSL() -> ssl.SSLContext:
-    """腾讯这套证书链在容器里偶发校验失败；这里只取数据，不涉及凭据外发。
-
-    关掉校验是**有意**的取舍：容器里的 CA 根证书经常比 App 侧的证书旧，
-    开着会让整条链路随机失败。这里只 GET/POST 自己的战绩数据。
-    """
-    上下文 = ssl.create_default_context()
-    上下文.check_hostname = False
-    上下文.verify_mode = ssl.CERT_NONE
-    return 上下文
 
 
 def 拼Cookie(凭据: dict[str, Any]) -> str:
@@ -288,11 +275,11 @@ class 掌瓦传输:
         if _通用查询:
             地址 = f"{地址}?{_通用查询}"
 
-        连接器 = aiohttp.TCPConnector(ssl=_不校验的SSL())
         _记(f"→ {方法} {路径} body={_体摘要(json体)}")
-        async with aiohttp.ClientSession(
-            connector=连接器, timeout=aiohttp.ClientTimeout(total=self._超时)
-        ) as 会话:
+        # 用 aiohttp 默认的 TLS：校验证书链与主机名。请求里带 Cookie
+        # （openid / access_token / tid），关校验等于把这几个交给中间人。
+        # 容器 CA 缺失请装 ca-certificates，不要全局降级。
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self._超时)) as 会话:
             async with 会话.request(方法, 地址, headers=头, json=json体) as 响应:
                 文本 = await 响应.text(errors="ignore")
             try:
