@@ -72,7 +72,6 @@ class Test状态自查:
     def test_状态要报绑定时长(self):
         体 = _函数体内("状态")
         assert "已绑多久(" in 体, "状态应显示已绑定多久"
-        assert "该提醒重绑(" in 体, "超过绑定期应主动提醒重绑"
 
 
 class Test调模型:

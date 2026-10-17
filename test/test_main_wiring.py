@@ -123,19 +123,21 @@ class Test兜底同步:
         assert not 缺, f"帮助文本里没列这些指令：{缺}"
 
     def test_帮助说明_PK_写昵称而不是艾特群友(self):
-        """QQ 官方机器人收不到 @别人，README 曾在这一点上写错。"""
-        帮助块 = _帮助块()
-        assert "PK <群友昵称>" in 帮助块
-        assert "拿不到标识" in 帮助块
+        """QQ 官方机器人收不到 @别人，README 曾在这一点上写错。
+
+        帮助里收成一行一句后不再解释原因，但写法必须还是「写昵称」。
+        """
+        assert "PK <群友昵称>" in _帮助块()
 
     def test_帮助首行是产品名加游戏名(self):
         assert _帮助块().lstrip().startswith("爱瓦 · ")
 
-    def test_说明数据来自哪里(self):
-        assert "数据来自" in _帮助块()
+    def test_标题写明数据来自哪里(self):
+        """文案收成一行一句后，数据来源只留在标题里。"""
+        assert "国服" in _帮助块().splitlines()[0]
 
     def test_说明自然语言也能用(self):
-        assert "直接问模型" in _帮助块()
+        assert "自然语言" in _帮助块()
 
 
 class Test兜底不越界:

@@ -67,7 +67,7 @@ class Test改名字行为:
         """别人第一反应是「我是不是被占了」。顺手告诉他有几个人同名。"""
         体 = _函数体("昵称")
         assert "找同名的人(" in 体
-        assert "点错人" in 体
+        assert "个人叫这个" in 体
 
     def test_没绑定时挡住(self):
         体 = _函数体("昵称")
@@ -77,9 +77,6 @@ class Test改名字行为:
 class Test帮助文本提到:
     def test_列表里有昵称(self):
         assert "/爱瓦 昵称" in 主源码
-
-    def test_说清不用重绑(self):
-        assert "不用重新绑定" in 主源码
 
     def test_绑定成功时告知可改(self):
         """不然用户根本不知道有这个指令。"""

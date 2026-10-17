@@ -41,18 +41,14 @@ class Test绑定不再挡人:
         体 = _函数体("绑定")
         assert "_绑定还活着(" in 体, "绑定指令不能无条件挡已绑定的用户——他可能只是登录态过期了"
 
-    def test_失效时说不用解绑(self):
+    def test_失效时直接让人重扫(self):
         体 = _函数体("绑定")
-        assert "不用解绑" in 体, "失效时要明说可以直接重扫"
-        assert "直接重新扫码" in 体
+        assert "重新扫码就行" in 体, "失效时要直接给出重扫这个动作"
 
     def test_活着时才挡(self):
         """换号才需要解绑。登录态过期不属于「换号」。"""
         体 = _函数体("绑定")
-        assert "要换号先发 /爱瓦 解绑" in 体
-        # 「登录态正常」这句话必须跟挡人的分支绑在一起，
-        # 否则又变成无条件挡
-        assert "登录态正常" in 体
+        assert "换号先发 /爱瓦 解绑" in 体
 
 
 class Test绑定还活着_必须真打接口:
@@ -81,26 +77,20 @@ class Test绑定还活着_必须真打接口:
         assert "凭据是否齐全" in 体
 
 
-class Test过期文案要说清怎么修:
+class Test过期文案要给出动作:
     def test_战绩文案(self):
         体 = _函数体("_取近期战绩")
-        assert "不用先解绑" in 体, "只说「请重新绑定」不够——绑定指令以前会挡回来"
+        assert "重新发 /爱瓦 绑定" in 体, "只说「登录态失效」不够，要给出下一步动作"
 
     def test_状态文案(self):
         体 = _函数体("状态")
-        assert "不用先解绑" in 体
+        assert "重新发 /爱瓦 绑定" in 体
 
     def test_PK要指出是谁过期(self):
         """以前只说「有人的登录态失效了」，两边都得重扫一遍。"""
         体 = _函数体("PK")
         assert "甲名" in 体 and "乙名" in 体
-        assert "的登录态失效了" in 体
-
-
-class Test帮助文本:
-    def test_说明过期可重扫(self):
-        assert "不用先解绑" in 主源码
-        assert "重扫" in 主源码 or "重新扫码" in 主源码
+        assert "的登录态失效" in 体
 
 
 if __name__ == "__main__":

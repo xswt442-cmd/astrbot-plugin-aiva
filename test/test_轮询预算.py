@@ -90,17 +90,16 @@ class Test轮询循环结构:
 
 
 class Test区分不出码原因:
-    def test_码过期与用户无关(self):
-        """文案必须说清不是用户扫错，否则下次还会被误解成操作问题。"""
+    def test_码过期要说是码过期了(self):
         绑定 = ast.get_source_segment(主源码, _绑定函数()) or ""
-        assert "在你扫之前就过期了" in 绑定
+        assert "码已过期" in 绑定
 
     def test_过期与解析失败分开说(self):
         """「码过期」是我们慢，「解析失败」是我们的 bug，文案不能混。
         混了就会让用户反复扫码，而真正要修的是解析。"""
         绑定 = ast.get_source_segment(主源码, _绑定函数()) or ""
-        assert "不是你的问题" in 绑定
         assert '"过期" in str(exc)' in 绑定, "两种失败必须靠判断分叉，不能共用一句文案"
+        assert "码已过期，重新发 /爱瓦 绑定。" in 绑定
 
     def test_解析失败时把跳转轨迹打进日志(self):
         """下一次能不能定位，全看轨迹有没有记全。"""
