@@ -40,6 +40,9 @@ __all__ = [
     "记昵称",
     "已绑多久",
     "该提醒重绑",
+    "记失效",
+    "清失效",
+    "刚失效过",
     "找同名的人",
 ]
 
@@ -56,6 +59,38 @@ _必备字段 = ("openid", "access_token", "userId", "tid")
 
 # PK 名字要念进提示词里，太长会挤掉版面。与 `main.py` 的校验同一个值。
 _昵称上限 = 16
+
+# 一次失效之后，状态不能靠「这一次恰好成功」就宣布正常。
+# 实测：重绑后的头几分钟，新旧会话在服务端交替生效，同一个号会几秒内时好时坏
+# （00:39 失效、00:40 成功、7 秒后又失效）。所以记下最近一次失效时间，
+# 半小时内按「还没好」处理，等真正取到数据再抹掉。
+_失效记忆秒 = 30 * 60
+
+
+def 记失效(凭据: dict[str, Any], 现在: float | None = None) -> dict[str, Any]:
+    """在凭据上盖一个「最近一次登录态失效」的时间戳（就地改）。"""
+    凭据["最近失效"] = int(现在 if 现在 is not None else time.time())
+    return 凭据
+
+
+def 清失效(凭据: dict[str, Any]) -> dict[str, Any]:
+    """成功取到数据后抹掉时间戳（就地改）。"""
+    凭据.pop("最近失效", None)
+    return 凭据
+
+
+def 刚失效过(凭据: dict[str, Any] | None, 现在: float | None = None) -> bool:
+    """半小时内失效过就算还没好。没有记录、或记录太旧都算好。"""
+    if not 凭据:
+        return False
+    try:
+        时刻 = int(凭据.get("最近失效") or 0)
+    except (TypeError, ValueError):
+        return False
+    if not 时刻:
+        return False
+    当前 = 现在 if 现在 is not None else time.time()
+    return 0 <= 当前 - 时刻 <= _失效记忆秒
 
 
 def 凭据是否齐全(凭据: dict[str, Any] | None) -> bool:

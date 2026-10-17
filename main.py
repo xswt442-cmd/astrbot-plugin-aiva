@@ -37,8 +37,11 @@ from .aiva.storage import (
     凭据仓库,
     凭据摘要,
     凭据是否齐全,
+    刚失效过,
     已绑多久,
     找同名的人,
+    清失效,
+    记失效,
     记昵称,
     记绑定时间,
 )
@@ -272,7 +275,7 @@ class Main(Star):
             # 要先解绑。实测踩过（00:19 那轮）。
             #
             # 所以先看这个绑定**还活着吗**，死了就允许直接覆盖重扫。
-            还活着 = await self._绑定还活着(已有)
+            还活着 = await self._绑定还活着(用户, 已有)
             if 还活着:
                 yield event.plain_result(
                     f"已经绑定了账号（{凭据摘要(已有)}），换号先发 /爱瓦 解绑。"
@@ -449,6 +452,12 @@ class Main(Star):
             yield event.plain_result(f"本地记录不完整（{凭据摘要(凭据)}），重新发 /爱瓦 绑定。")
             return
 
+        # 刚失效过就别急着报好消息：这时候打接口十有八九能撞上一个「好窗口」，
+        # 用户看到「绑定正常」转头又被打脸。
+        if 刚失效过(凭据):
+            yield event.plain_result(f"已绑定（{凭据摘要(凭据)}），{_登录过期提示}")
+            return
+
         传输 = 掌瓦传输(self._请求超时)
         try:
             角色 = await 传输.取主角色(凭据)
@@ -467,7 +476,7 @@ class Main(Star):
         战绩可用 = True
         战绩原因 = ""
         try:
-            await 取对局(凭据, 每页=1)
+            await self._取对局记账(用户, 凭据, 每页=1)
         except 登录过期:
             战绩可用 = False
             战绩原因 = "登录态已失效"
@@ -550,7 +559,7 @@ class Main(Star):
 
         if 凭据 and 凭据是否齐全(凭据):
             try:
-                原始的对局, _角色 = await 取对局(凭据)
+                原始的对局, _角色 = await self._取对局记账(用户, 凭据)
                 摘要 = 聚合(原始的对局)
             except Exception as exc:  # noqa: BLE001 - 推演不因查不到就停
                 logger.info(f"[aiva] 开一局读战绩失败，按默认水平：{exc}")
@@ -639,7 +648,7 @@ class Main(Star):
         # 都去重扫，一半的人白扫一次。合成一个 try 是做不到的：第一句抛异常
         # 时 `甲列表` 还没绑上，except 里再去读它只会 UnboundLocalError。
         try:
-            甲列表, 甲角色 = await 取对局(甲凭据)
+            甲列表, 甲角色 = await self._取对局记账(自己, 甲凭据)
         except 登录过期:
             yield event.plain_result(f"{甲名}的登录态失效，重新发 /爱瓦 绑定。")
             return
@@ -652,7 +661,7 @@ class Main(Star):
             return
 
         try:
-            乙列表, 乙角色 = await 取对局(乙凭据)
+            乙列表, 乙角色 = await self._取对局记账(对手标识, 乙凭据)
         except 登录过期:
             yield event.plain_result(f"{乙名}的登录态失效，让他重发 /爱瓦 绑定。")
             return
@@ -721,7 +730,7 @@ class Main(Star):
         # 老记录可能是净化之前存进去的，念之前再洗一次。
         return 净化昵称(凭据.get("昵称") or "") or 净化昵称(平台显示名) or 兜底
 
-    async def _绑定还活着(self, 凭据: dict[str, Any]) -> bool:
+    async def _绑定还活着(self, 用户: str, 凭据: dict[str, Any]) -> bool:
         """这份绑定的登录态还能不能取到战绩。
 
         **必须真的打一次接口**。`get_main_role_raw` 只要 Cookie 形状对就回
@@ -733,13 +742,34 @@ class Main(Star):
         """
         if not 凭据是否齐全(凭据):
             return False
+        if 刚失效过(凭据):
+            # 刚失败过就别拦着重绑——用户要的是直接重扫，不是先解绑。
+            return False
         try:
-            await 取对局(凭据, 每页=1)
+            await self._取对局记账(用户, 凭据, 每页=1)
         except (登录过期, 业务错误):
             return False
         except Exception:  # noqa: BLE001
             return True
         return True
+
+    async def _取对局记账(
+        self, 用户: str, 凭据: dict[str, Any], 每页: int = 20
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """取对局，顺手把「刚失效过」记在凭据上。
+
+        只判单次请求的成败是不够的：重绑后的头几分钟，新旧会话在服务端交替
+        生效，同一个号会几秒内时好时坏。状态指令如果只看这一次成功就说
+        「绑定正常」，用户拿到的是一条随时会翻车的绿线。
+        """
+        try:
+            结果 = await 取对局(凭据, 每页=每页)
+        except 登录过期:
+            self._凭据.写入(用户, 记失效(凭据))
+            raise
+        if 凭据.get("最近失效"):
+            self._凭据.写入(用户, 清失效(凭据))
+        return 结果
 
     async def _取近期战绩(self, 用户: str) -> tuple[str, dict[str, Any]]:
         """取数据并折成文本。取不到时抛 `这句给用户`。
@@ -755,7 +785,7 @@ class Main(Star):
             raise 这句给用户("还没绑定，先发 /爱瓦 绑定。")
 
         try:
-            原始列表, 角色 = await 取对局(凭据)
+            原始列表, 角色 = await self._取对局记账(用户, 凭据)
         except 登录过期 as exc:
             # 文案必须说清「怎么修」：光说「请重新绑定」不够——绑定指令
             # 以前会回「你已经绑定了，要换号先解绑」，用户被两面挡。
