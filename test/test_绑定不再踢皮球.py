@@ -78,13 +78,20 @@ class Test绑定还活着_必须真打接口:
 
 
 class Test过期文案要给出动作:
+    def test_常量本身带原因与动作(self):
+        """掌瓦是单端登录：手机重登会把这里挤掉，只说「重新绑定」等于没说。"""
+        源码 = (Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
+
+        assert "重新发 /爱瓦 绑定" in 源码
+        assert "同一账号只允许一处" in 源码
+
     def test_战绩文案(self):
         体 = _函数体("_取近期战绩")
-        assert "重新发 /爱瓦 绑定" in 体, "只说「登录态失效」不够，要给出下一步动作"
+        assert "_登录过期提示" in 体, "要说清原因，别写死一句「登录态失效」"
 
     def test_状态文案(self):
         体 = _函数体("状态")
-        assert "重新发 /爱瓦 绑定" in 体
+        assert "_登录过期提示" in 体
 
     def test_PK要指出是谁过期(self):
         """以前只说「有人的登录态失效了」，两边都得重扫一遍。"""

@@ -357,7 +357,7 @@ def _翻译错误(原始: dict[str, Any]) -> str:
     码 = 原始.get("result", -1)
     消息 = str(原始.get("err_msg") or 原始.get("errMsg") or "")
     if _是登录问题(原始):
-        return "登录态失效，请重新扫码绑定"
+        return "登录态失效，重新发 /爱瓦 绑定"
     if "wrong scene" in 消息.lower():
         # 自己少传了 scene/game_role_id，跟用户的登录态无关。
         return "内部取数据缺参数（scene），这是插件的 bug，已记日志"

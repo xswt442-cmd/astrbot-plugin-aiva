@@ -132,6 +132,12 @@ def _配置开关(config: Any, 键: str, 默认: bool) -> bool:
         return 默认
 
 
+# 掌瓦的登录态是「同一账号只允许一处在线」，新登录会把旧的挤掉。
+# 实测：bot 绑好之后用户在手机 App 上重新登录，7 秒后 record/list 就回 1003。
+# 所以过期提示必须带原因，只写「重新绑定」会让人以为插件坏了。
+_登录过期提示 = "登录态失效，重新发 /爱瓦 绑定。掌瓦同一账号只允许一处在线，手机上登过会挤掉这里。"
+
+
 # 直连 provider 时给的系统提示。原来的提示全写在 user 消息里（`prompts.py`
 # 生成的 927 字），拆出一层 system 只是为了把「你是谁」和「这次要干什么」
 # 分开——省不了多少字，但模型对 system 段的指令遵循明显更稳。
@@ -377,7 +383,8 @@ class Main(Star):
             名字 = str(凭据.get("昵称") or "").strip()
             yield event.plain_result(
                 f"绑定成功（{凭据摘要(凭据)}）。\n"
-                f"PK 名字是「{名字 or '（没取到）'}」，要改发 /爱瓦 昵称。"
+                f"PK 名字是「{名字 or '（没取到）'}」，要改发 /爱瓦 昵称。\n"
+                "掌瓦同一账号只能登一处，手机上再登会让这里的登录态失效。"
             )
         finally:
             await 会话.关闭()
@@ -446,7 +453,7 @@ class Main(Star):
         try:
             角色 = await 传输.取主角色(凭据)
         except 登录过期:
-            yield event.plain_result(f"已绑定（{凭据摘要(凭据)}），登录态失效，重新发 /爱瓦 绑定。")
+            yield event.plain_result(f"已绑定（{凭据摘要(凭据)}），{_登录过期提示}")
             return
         except 业务错误 as exc:
             yield event.plain_result(f"接口取不到角色信息：{exc}")
@@ -753,7 +760,7 @@ class Main(Star):
             # 文案必须说清「怎么修」：光说「请重新绑定」不够——绑定指令
             # 以前会回「你已经绑定了，要换号先解绑」，用户被两面挡。
             # 现在绑定指令已允许覆盖重扫，这里就照实说「直接重扫」。
-            raise 这句给用户("登录态失效，重新发 /爱瓦 绑定。") from exc
+            raise 这句给用户(_登录过期提示) from exc
         except 业务错误 as exc:
             raise 这句给用户(f"接口不给数据：{exc}") from exc
         except Exception as exc:
