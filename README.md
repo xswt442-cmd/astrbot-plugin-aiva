@@ -19,12 +19,29 @@ AstrBot 插件。扫码绑定自己的掌上无畏契约账号后，问它就能
 掌上无畏契约 App（包名 `com.tencent.apps.valorant`）的私有接口
 `https://app.mval.qq.com`。
 
-国服**没有**官方公开 API：Riot 官方 API 只覆盖国际服，`api.riotgames.cn`、
+国服**没有**官方公开 API：Riot 官方 API 只覆盖国际服、`api.riotgames.cn`、
 `pd.cn.a.pvp.net` 实测 DNS 无记录。所以这条路：
 
 - 必须扫码登录一次（QQ OAuth + 掌瓦换票）；
 - `mcode` 是硬编码的渠道串，腾讯轮换即失效；
 - 私享战绩开着的号查不到，这个对所有第三方工具都一样。
+
+### 会连哪些地址
+
+全部 HTTPS，没有别的域名，也不往任何第三方发送数据：
+
+| 地址 | 什么时候用 |
+|---|---|
+| `https://app.mval.qq.com` | 查战绩、换票。唯一携带登录态的接口 |
+| `https://xui.ptlogin2.qq.com` | 扫码登录入口页 |
+| `https://ssl.ptlogin2.qq.com` | 轮询扫码状态 |
+| `https://ptlogin4.openmobile.qq.com` | 登录跳转链上的中转页 |
+| `https://openmobile.qq.com` | 同上（Referer） |
+| `https://connect.qq.com` | 登录回跳地址 |
+| `https://imgcache.qq.com` | 二维码图片 |
+
+登录跳转只跟 `*.qq.com`；跳到别的域会直接断链，会话里的 cookie 不外流
+（见 `aiva/auth/ptlogin.py` 的 `_可以跟跳`）。
 
 ## 主要功能
 
@@ -45,7 +62,13 @@ AstrBot 插件。扫码绑定自己的掌上无畏契约账号后，问它就能
 
 ## 配置
 
-没有配置项。
+在 AstrBot 的插件配置页里改，改完立即生效（不用重装插件）。
+
+| 配置项 | 默认 | 说明 |
+|---|---|---|
+| 接口超时（秒） | 20 | 掌瓦接口单次请求的等待上限 |
+| 模型超时（秒） | 90 | 锐评 / PK / 开一局等模型回话的上限，超时换新请求重试一次 |
+| 允许 PK | 开 | 关掉后 `/爱瓦 PK` 只回一句「PK 已关闭」，其它指令不受影响 |
 
 ## 使用
 

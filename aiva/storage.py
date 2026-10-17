@@ -16,14 +16,26 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
+
+# 昵称会拼进 PK 提示词。带换行就等于在提示词里凭空多出一行指令；零宽字符
+# 还能让两个名字看起来一模一样。存之前就洗掉，读出来用之前再洗一次。
+_控制字符 = re.compile(r"[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202f\u2060\ufeff]")
+
+
+def 净化昵称(名: str) -> str:
+    """去掉控制字符与零宽字符，再压掉首尾空白。"""
+    return _控制字符.sub("", str(名 or "")).strip()
+
 
 __all__ = [
     "凭据仓库",
     "凭据是否齐全",
     "凭据摘要",
+    "净化昵称",
     "记绑定时间",
     "记昵称",
     "已绑多久",
@@ -74,7 +86,7 @@ def 记昵称(凭据: dict[str, Any], 昵称: str) -> dict[str, Any]:
     （不是适配器过滤掉的，是服务端没给）。组件链里只有 @机器人 一个。
     所以 PK 在 QQ 官方上只能靠名字认人。
     """
-    值 = str(昵称 or "").strip()
+    值 = 净化昵称(昵称)
     if 值:
         凭据["昵称"] = 值[:_昵称上限]
     return 凭据
@@ -184,10 +196,18 @@ class 凭据仓库:
 
     def 删除(self, 用户: str) -> bool:
         路径 = self.路径(用户)
+        # 写盘是「先写 .json.tmp 再 os.replace」。中途崩掉会留下临时文件，
+        # 里面同样是一份完整凭据，解绑时一并清掉。
+        临时 = 路径.with_suffix(f"{_文件后缀}.tmp")
         try:
             路径.unlink()
         except FileNotFoundError:
             return False
         except OSError:
             return False
+        finally:
+            try:
+                临时.unlink(missing_ok=True)
+            except OSError:
+                pass
         return True

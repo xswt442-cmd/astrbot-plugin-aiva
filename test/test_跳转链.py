@@ -11,9 +11,11 @@ HTTP `Location` 头，和正文里的 `auth://tauth.qq.com/...`。
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from aiva.auth.ptlogin import _从地址提凭据, _正文里的下一跳, 扫码会话
+from aiva.auth.ptlogin import _从地址提凭据, _可以跟跳, _正文里的下一跳, 扫码会话
 
 
 class Test正文里的下一跳:
@@ -279,3 +281,43 @@ class Test换回调链路:
             encoding="utf-8"
         )
         assert "await self._用密钥换凭据(跳转)" in 源码, "必须在抛错前先尝试换回调"
+
+
+class Test跳转只许腾讯域:
+    """会话里带着 cookie，跟着任意 Location 走等于把登录态交给对方。
+
+    腾讯会换子域（ptlogin2 / ptlogin4 / xui / graph…），枚举主机名跟不上，
+    所以按后缀 `*.qq.com` 判。
+    """
+
+    @pytest.mark.parametrize(
+        "地址",
+        [
+            "https://xui.ptlogin2.qq.com/cgi-bin/xlogin",
+            "http://ptlogin4.openmobile.qq.com/check_sig?ptsigx=1",
+            "https://ssl.ptlogin2.qq.com/check?uin=1",
+            "https://connect.qq.com/",
+            "https://QQ.COM/a",
+        ],
+    )
+    def test_腾讯域放行(self, 地址):
+        assert _可以跟跳(地址)
+
+    @pytest.mark.parametrize(
+        "地址",
+        [
+            "https://evil.com/",
+            "https://qq.com.evil.com/",  # 后缀伪装
+            "https://notqq.com/",
+            "http://127.0.0.1:8080/",
+            "file:///etc/passwd",
+            "",
+        ],
+    )
+    def test_非腾讯域拒绝(self, 地址):
+        assert not _可以跟跳(地址)
+
+    def test_追跳转里真的会拦(self):
+        源码 = Path(__file__).resolve().parent.parent / "aiva" / "auth" / "ptlogin.py"
+        源 = 源码.read_text(encoding="utf-8")
+        assert "_可以跟跳(下一位)" in 源, "拿到了下一跳却没用白名单判，等于没有拦"

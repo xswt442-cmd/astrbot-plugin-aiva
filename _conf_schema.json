@@ -1,0 +1,20 @@
+{
+  "request_timeout_seconds": {
+    "description": "接口超时（秒）",
+    "type": "int",
+    "default": 20,
+    "hint": "掌瓦接口单次请求的等待上限。网络慢可以调大，但别超过 60——扫码轮询也在等它。"
+  },
+  "model_timeout_seconds": {
+    "description": "模型超时（秒）",
+    "type": "int",
+    "default": 90,
+    "hint": "锐评 / PK / 开一局等模型回话的上限，超时会换一条新请求重试一次。"
+  },
+  "pk_enabled": {
+    "description": "允许 PK",
+    "type": "bool",
+    "default": true,
+    "hint": "关掉后 /爱瓦 PK 只回一句「PK 已关闭」，其它指令不受影响。不想让群友互相查时用。"
+  }
+}

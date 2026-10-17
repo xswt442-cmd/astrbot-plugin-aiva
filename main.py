@@ -19,10 +19,9 @@ from pathlib import Path
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent
+from astrbot.api.event import AstrMessageEvent, MessageEventResult
 from astrbot.api.event.filter import command_group, custom_filter, llm_tool
 from astrbot.api.star import Context, Star
-from astrbot.core.platform.astr_message_event import MessageEventResult
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.star.filter.custom_filter import CustomFilter
 
@@ -34,6 +33,7 @@ from .aiva.pk import 从原始载荷认对手, 从提及里找对手, 找对手,
 from .aiva.prompts import PK提示, 开局提示, 锐评提示
 from .aiva.stats import 占优项数, 对比文本, 对比要点, 聚合, 近况文本
 from .aiva.storage import (
+    净化昵称,
     凭据仓库,
     凭据摘要,
     凭据是否齐全,
@@ -110,6 +110,27 @@ _轮询预算 = 55.0
 # 实测正常一次 20~30 秒（max_steps=8，可能多轮工具调用），90 秒留足余量：
 # 超了就是上游真有问题，早点失败比让人干等强。
 _模型超时 = 90.0
+
+
+def _配置整数(config: Any, 键: str, 默认: int) -> int:
+    """从配置里取正整数。缺项、写错、非正数都退回默认值。"""
+    if config is None:
+        return 默认
+    try:
+        值 = int(config.get(键, 默认))
+    except (TypeError, ValueError):
+        return 默认
+    return 值 if 值 > 0 else 默认
+
+
+def _配置开关(config: Any, 键: str, 默认: bool) -> bool:
+    if config is None:
+        return 默认
+    try:
+        return bool(config.get(键, 默认))
+    except Exception:  # noqa: BLE001 - 配置读不到就当默认
+        return 默认
+
 
 # 直连 provider 时给的系统提示。原来的提示全写在 user 消息里（`prompts.py`
 # 生成的 927 字），拆出一层 system 只是为了把「你是谁」和「这次要干什么」
@@ -212,6 +233,9 @@ class Main(Star):
         # 代价是拿不到框架 logger。这里把 logger 挂给它 ——
         # 「用户说没反应」这类问题唯一的出路就是日志。
         挂日志(lambda 一句: logger.info(f"[aiva] {一句}"))
+        self._请求超时 = _配置整数(config, "request_timeout_seconds", 20)
+        self._模型超时 = _配置整数(config, "model_timeout_seconds", int(_模型超时))
+        self._允许PK = _配置开关(config, "pk_enabled", True)
         self._凭据 = 凭据仓库(self._数据目录())
 
     def _数据目录(self) -> Path:
@@ -327,7 +351,7 @@ class Main(Star):
                     f"[aiva] 第{问了几轮}轮未确认，腾讯返回 {getattr(会话, '最近原文', '')[:160]!r}"
                 )
 
-            传输 = 掌瓦传输()
+            传输 = 掌瓦传输(self._请求超时)
             try:
                 凭据 = await 传输.换票(结果.openid, 结果.access_token)
             except 业务错误 as exc:
@@ -382,9 +406,10 @@ class Main(Star):
             yield event.plain_result("还没绑定，先发 /爱瓦 绑定。")
             return
 
-        新名 = str(名字 or "").strip()
+        # 先洗掉换行与零宽字符：昵称会被拼进 PK 提示词，带换行等于多一行指令。
+        新名 = 净化昵称(名字)
         if not 新名:
-            当前 = str(凭据.get("昵称") or "").strip()
+            当前 = 净化昵称(凭据.get("昵称") or "")
             yield event.plain_result(f"当前 PK 名字：「{当前 or '（还没设）'}」。")
             return
 
@@ -417,7 +442,7 @@ class Main(Star):
             yield event.plain_result(f"本地记录不完整（{凭据摘要(凭据)}），重新发 /爱瓦 绑定。")
             return
 
-        传输 = 掌瓦传输()
+        传输 = 掌瓦传输(self._请求超时)
         try:
             角色 = await 传输.取主角色(凭据)
         except 登录过期:
@@ -539,6 +564,10 @@ class Main(Star):
     @爱瓦.command("PK", alias={"pk", "对战"})
     async def PK(self, event: AstrMessageEvent):
         """和另一个已绑定的人比近期战绩。"""
+        if not self._允许PK:
+            yield event.plain_result("PK 已关闭。")
+            return
+
         自己 = event.get_sender_id()
         甲凭据 = self._凭据.读取(自己)
         if not 甲凭据 or not 凭据是否齐全(甲凭据):
@@ -670,7 +699,7 @@ class Main(Star):
         同步函数漏写 await 的地方根本调不出结果，TypeError 当场就炸。
         """
         try:
-            名字 = str(event.get_sender_name() or "").strip()
+            名字 = 净化昵称(event.get_sender_name() or "")
         except Exception:
             return ""
         return 名字[:_昵称上限]
@@ -682,7 +711,8 @@ class Main(Star):
         优先用他自己在 `/爱瓦 昵称` 里设的名字——那是群里点人时用的称呼，
         而平台给的显示名在 QQ 官方上是 QQ 昵称而不是群昵称，常常点不到人。
         """
-        return str(凭据.get("昵称") or "").strip() or 平台显示名.strip() or 兜底
+        # 老记录可能是净化之前存进去的，念之前再洗一次。
+        return 净化昵称(凭据.get("昵称") or "") or 净化昵称(平台显示名) or 兜底
 
     async def _绑定还活着(self, 凭据: dict[str, Any]) -> bool:
         """这份绑定的登录态还能不能取到战绩。
@@ -768,7 +798,9 @@ class Main(Star):
         if 实例 is None:
             raise RuntimeError(f"模型 {提供方!r} 不存在或没启用。")
 
-        logger.info(f"[aiva] 调模型 provider={提供方!r} 提示{len(提示)}字，最多等 {_模型超时}秒")
+        logger.info(
+            f"[aiva] 调模型 provider={提供方!r} 提示{len(提示)}字，最多等 {self._模型超时}秒"
+        )
 
         async def 打一次() -> str:
             结果 = await asyncio.wait_for(
@@ -777,7 +809,7 @@ class Main(Star):
                     system_prompt=_模型系统提示,
                     request_max_retries=1,
                 ),
-                timeout=_模型超时,
+                timeout=self._模型超时,
             )
             return (getattr(结果, "completion_text", "") or "").strip()
 
@@ -791,7 +823,7 @@ class Main(Star):
         except asyncio.TimeoutError:
             用时 = time.monotonic() - 起点
             logger.warning(
-                f"[aiva] 调模型第1次超过 {_模型超时}秒（实际{用时:.0f}秒），"
+                f"[aiva] 调模型第1次超过 {self._模型超时}秒（实际{用时:.0f}秒），"
                 f"换新请求重试，provider={提供方!r}"
             )
             重试起点 = time.monotonic()

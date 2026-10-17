@@ -48,7 +48,7 @@ _XLOGIN = (
     "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?"
     "pt_enable_pwd=1&appid=716027609&pt_3rd_aid=102061775&daid=381"
     "&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1"
-    "&s_url=http%3A%2F%2Fconnect.qq.com&refer_cgi=m_authorize"
+    "&s_url=https%3A%2F%2Fconnect.qq.com&refer_cgi=m_authorize"
     "&ucheck=1&fall_to_wv=1&status_os=12"
     "&redirect_uri=auth%3A%2F%2Ftauth.qq.com%2F"
     "&client_id=102061775&pf=openmobile_android&response_type=token"
@@ -82,6 +82,18 @@ _密钥cookie域 = (
     "https://openmobile.qq.com",
     "https://connect.qq.com",
 )
+# 跳转链只允许落在腾讯自己的域里。腾讯会换子域（ptlogin2 / ptlogin4 / xui…），
+# 枚举具体主机名跟不上，但后缀稳定。跑到别的域就断链——会话里有 cookie，
+# 跟着任意 Location 走等于把登录态交给对方。
+_允许的跳转域 = (".qq.com",)
+
+
+def _可以跟跳(地址: str) -> bool:
+    """这个跳转目标是不是腾讯自己的域。"""
+    主机 = (urllib.parse.urlparse(地址).hostname or "").lower()
+    return 主机 == "qq.com" or 主机.endswith(_允许的跳转域[0])
+
+
 _APPID = "716027609"
 _DAID = "381"
 _第三方AID = "102061775"
@@ -159,8 +171,9 @@ class 扫码会话:
         抛 `RuntimeError` 表示腾讯侧没给图，直接让用户重试，不要往下走。
         """
         if self._会话 is None:
-            # 腾讯这套跳转会在多个子域之间来回，jar 默认的严格策略会把
-            # 回来的 Cookie 丢掉，pt_login_sig 就断了。
+            # `unsafe=True` 只管「允不允许给 IP 主机存 cookie」，跟域无关；
+            # 真正的域限制在 `_追跳转`：只跟 `*.qq.com`，别的一律断链。
+            # 严格策略会把腾讯来回跳时回的 Cookie 丢掉，pt_login_sig 就断了。
             self._会话 = aiohttp.ClientSession(
                 cookie_jar=aiohttp.CookieJar(unsafe=True),
                 timeout=aiohttp.ClientTimeout(total=20),
@@ -185,7 +198,7 @@ class 扫码会话:
                 "appid": _APPID,
                 "type": "0",
                 "t": str(time.time()),
-                "u1": "http://connect.qq.com",
+                "u1": "https://connect.qq.com",
                 "daid": _DAID,
                 "pt_3rd_aid": _第三方AID,
             }
@@ -215,7 +228,7 @@ class 扫码会话:
             raise RuntimeError("还没出码就轮询")
 
         参数 = {
-            "u1": "http://connect.qq.com",
+            "u1": "https://connect.qq.com",
             "from_ui": "1",
             "type": "1",
             "ptlang": "2052",
@@ -340,6 +353,11 @@ class 扫码会话:
             )
 
             if 下一位:
+                # 相对路径要先补成绝对地址，否则拿不到 host、也没法判域。
+                下一位 = urllib.parse.urljoin(当前, 下一位)
+                if not _可以跟跳(下一位):
+                    self._记轨迹(f"跳向非腾讯域，断链：{_短(下一位, 60)}")
+                    break
                 当前 = 下一位
                 continue
             m = re.search(r"(auth://tauth\.qq\.com/[^\s\"'<>]+)", 正文.replace("\\/", "/"))

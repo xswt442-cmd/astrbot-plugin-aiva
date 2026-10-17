@@ -13,6 +13,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from aiva.storage import 净化昵称
+
 仓库根 = Path(__file__).resolve().parent.parent
 主源码 = (仓库根 / "main.py").read_text(encoding="utf-8")
 树 = ast.parse(主源码)
@@ -88,3 +90,20 @@ if __name__ == "__main__":
     import pytest
 
     pytest.main([__file__, "-v"])
+
+
+class Test净化昵称:
+    """昵称会拼进 PK 提示词：换行能伪造指令，零宽字符能让两个名字看着一样。"""
+
+    def test_换行与制表符被去掉(self):
+        assert 净化昵称("老\n王\t") == "老王"
+
+    def test_零宽字符被去掉(self):
+        assert 净化昵称("老\u200b王") == "老王"
+
+    def test_首尾空白被压掉(self):
+        assert 净化昵称("  老王  ") == "老王"
+
+    def test_空值不抛(self):
+        assert 净化昵称("") == ""
+        assert 净化昵称(None) == ""
