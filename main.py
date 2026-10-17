@@ -212,9 +212,7 @@ class Main(Star):
                 )
                 return
             logger.info(f"[aiva] 用户 {用户} 已有绑定但已失效，允许直接覆盖重绑")
-            yield event.plain_result(
-                f"之前的绑定失效了（{凭据摘要(已有)}），重新扫码就行。"
-            )
+            yield event.plain_result(f"之前的绑定失效了（{凭据摘要(已有)}），重新扫码就行。")
 
         会话 = 扫码会话()
         try:
@@ -275,9 +273,7 @@ class Main(Star):
                     # 「码过期」和「解析失败」是两回事，用户看到的文案必须分开：
                     # 前者是我们问得太慢，后者是我们自己的解析 bug。
                     if "过期" in str(exc):
-                        yield event.plain_result(
-                            f"扫码失败：{exc}。码已过期，重新发 /爱瓦 绑定。"
-                        )
+                        yield event.plain_result(f"扫码失败：{exc}。码已过期，重新发 /爱瓦 绑定。")
                     else:
                         yield event.plain_result(f"扫码失败：{exc}。")
                     return
@@ -381,18 +377,14 @@ class Main(Star):
             yield event.plain_result("还没绑定，先发 /爱瓦 绑定。")
             return
         if not 凭据是否齐全(凭据):
-            yield event.plain_result(
-                f"本地记录不完整（{凭据摘要(凭据)}），重新发 /爱瓦 绑定。"
-            )
+            yield event.plain_result(f"本地记录不完整（{凭据摘要(凭据)}），重新发 /爱瓦 绑定。")
             return
 
         传输 = 掌瓦传输()
         try:
             角色 = await 传输.取主角色(凭据)
         except 登录过期:
-            yield event.plain_result(
-                f"已绑定（{凭据摘要(凭据)}），登录态失效，重新发 /爱瓦 绑定。"
-            )
+            yield event.plain_result(f"已绑定（{凭据摘要(凭据)}），登录态失效，重新发 /爱瓦 绑定。")
             return
         except 业务错误 as exc:
             yield event.plain_result(f"接口取不到角色信息：{exc}")
@@ -419,9 +411,7 @@ class Main(Star):
 
         if not 战绩可用:
             logger.warning(f"[aiva] 用户 {用户} 状态自查失败：{战绩原因}")
-            yield event.plain_result(
-                f"绑定还在（{凭据摘要(凭据)}），但战绩取不到：{战绩原因}"
-            )
+            yield event.plain_result(f"绑定还在（{凭据摘要(凭据)}），但战绩取不到：{战绩原因}")
             return
 
         名字 = str(角色.get("nickname") or 角色.get("name") or "").strip()
@@ -550,9 +540,7 @@ class Main(Star):
                 )
                 return
             elif 关键词:
-                yield event.plain_result(
-                    f"没找到叫「{关键词}」的人，对方得先绑定并设昵称。"
-                )
+                yield event.plain_result(f"没找到叫「{关键词}」的人，对方得先绑定并设昵称。")
                 return
 
         # 认不出对手时把拿到的东西记下来。QQ 官方机器人**收不到 @别人**：
@@ -778,9 +766,7 @@ class Main(Star):
                 logger.warning(
                     f"[aiva] 调模型两次共 {总用时:.0f}秒都没回话，放弃，provider={提供方!r}"
                 )
-                raise RuntimeError(
-                    f"模型 {总用时:.0f} 秒没回话，稍后再试。"
-                ) from None
+                raise RuntimeError(f"模型 {总用时:.0f} 秒没回话，稍后再试。") from None
 
         用时 = time.monotonic() - 起点
         logger.info(f"[aiva] 模型用时{用时:.1f}秒，返回 {len(文本)} 字")
