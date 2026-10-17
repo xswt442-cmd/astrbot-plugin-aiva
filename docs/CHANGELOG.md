@@ -5,6 +5,18 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.6] - 2026-10-17
+
+### 修正
+
+- **日志不再打印请求体里的凭据。** 换票请求体的 `login_info` 里有 openid 与
+  sig（sig 就是 access_token），原来 `_体摘要` 对 dict 直接 `repr`，整段明文进了
+  INFO 日志。现在只打字段名，一个值都不打。
+- **登录跳转轨迹脱敏。** `keystr` / `ptsigx` / `code` / `access_token` /
+  `openid` 等参数一律替换成 `<redacted>`；回调地址、响应正文摘要、`最近原文`
+  都过一遍 `脱敏()`。
+- 删掉轨迹里的 `openid` 前 8 位——审核把「token 片段」也算泄漏。
+
 ## [0.2.5] - 2026-10-17
 
 ### 修正

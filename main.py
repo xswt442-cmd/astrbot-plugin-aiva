@@ -28,7 +28,7 @@ from astrbot.core.star.filter.custom_filter import CustomFilter
 
 # 全部在模块顶层导入。插件加载时就把整个包摸清：少文件、依赖缺失都在启动
 # 阶段报错，而不是等用户发了指令才在懒加载里抛模块不存在。
-from .aiva.auth.ptlogin import 扫码会话
+from .aiva.auth.ptlogin import 扫码会话, 脱敏
 from .aiva.match import 开局设定, 设定文本
 from .aiva.pk import 从原始载荷认对手, 从提及里找对手, 找对手, 提及摘要
 from .aiva.prompts import PK提示, 开局提示, 锐评提示
@@ -303,7 +303,7 @@ class Main(Star):
                 except RuntimeError as exc:
                     logger.info(
                         f"[aiva] 第{问了几轮}轮登录收尾失败：{exc}"
-                        f"\n  腾讯原始返回={getattr(会话, '最近原文', '')[:200]!r}"
+                        f"\n  腾讯原始返回={脱敏(getattr(会话, '最近原文', '')[:200])!r}"
                         f"\n  跳转链轨迹=\n    "
                         + "\n    ".join(getattr(会话, "跳转轨迹", []) or ["(没走成任何一跳)"])
                     )

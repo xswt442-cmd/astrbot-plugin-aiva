@@ -23,7 +23,24 @@ from typing import Any
 
 import aiohttp
 
-__all__ = ["扫码会话", "扫码结果", "还没轮到"]
+__all__ = ["扫码会话", "扫码结果", "还没轮到", "脱敏"]
+
+# 日志脱敏。跳转链 URL 里带 keystr / ptsigx / code，换票体里带 access_token，
+# 这些一旦进日志就等于把登录态留在磁盘上。市场审核把「片段」也算泄漏。
+_敏感字段 = re.compile(
+    r"(?i)(access_token|refresh_token|openid|sig|keystr|ptsigx|code|skey|p_skey"
+    r"|clientkey|pt2gguin|uin|token|password|passwd)"
+    r"([\"']?\s*[:=]\s*[\"']?)"
+    r"([^\"'&\s,<>}]+)"
+)
+
+
+def 脱敏(文本: str) -> str:
+    """把 `key=value` / `"key":"value"` 形式的敏感值替换成 `<redacted>`。"""
+    if not 文本:
+        return ""
+    return _敏感字段.sub(lambda m: f"{m.group(1)}{m.group(2)}<redacted>", 文本)
+
 
 # 手机 QQ 扫码不可逆着来：这组参数是 QQ 互联的移动侧参数，换成别的 unionid
 # 会拿到一个能被后续接口拒掉的 token。
@@ -258,7 +275,7 @@ class 扫码会话:
         # 这是整条链路最后也是最容易被漏掉的一步。
         凭据 = await self._用密钥换凭据(跳转)
         if 凭据 and 凭据.openid and 凭据.access_token:
-            self._记轨迹(f"用密钥换到了凭据 openid={凭据.openid[:8]}…")
+            self._记轨迹("用密钥换到了凭据")
             return 凭据
         # code=0 表示腾讯那边判定「扫了并确认了」，但我们没从跳转链里捞到
         # openid/access_token。这是**我们**的解析问题，不是用户没扫——
@@ -381,7 +398,7 @@ class 扫码会话:
 
     def _记轨迹(self, 一句: str) -> None:
         """记一跳。轨迹要留着给调用方打日志，登录态相关的值不能进日志。"""
-        self.跳转轨迹.append(一句)
+        self.跳转轨迹.append(脱敏(一句))
 
     def _取cookie(self, 名字: str, 域: str = "") -> str:
         """按名字取 cookie。

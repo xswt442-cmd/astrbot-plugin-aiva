@@ -311,18 +311,19 @@ class 掌瓦传输:
 
 
 def _体摘要(体: dict[str, Any] | None) -> str:
-    """请求体的日志摘要。
+    """请求体的日志摘要：只列字段名，一个值都不打。
 
-    只打字段名和值的**长度**，不打内容：`scene`、`openid`、`access_token`
-    都是登录态材料，写进日志就是留一份可以复用的凭据。
+    换票体的 `login_info` 里就是 openid 与 sig（sig 就是 access_token）。
+    早先这里对 dict 直接 `{值!r}`，等于把凭据原文写进 INFO 日志；
+    市场审核把「token 进日志」判为泄漏，**连片段都不行**。
     """
     if not 体:
         return "{}"
 
     def 一项(键: str, 值: Any) -> str:
-        if isinstance(值, str) and len(值) > 8:
-            return f"{键}={值[:6]}…({len(值)})"
-        return f"{键}={值!r}"
+        if isinstance(值, dict):
+            return f"{键}={{{', '.join(map(str, 值))}}}"
+        return f"{键}=<{type(值).__name__}>"
 
     return "{" + ", ".join(一项(k, v) for k, v in 体.items()) + "}"
 
